@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adjusted-Multiple Valuation</title>
+<style>
+  :root{
+    --ground:#f6f8fa; --surface:#fff; --surface-2:#eef2f6; --ink:#15202b; --muted:#5c6b7a; --faint:#8090a0;
+    --accent:#235a92; --accent-ink:#1b4a7c; --accent-soft:#dce7f2; --hairline:#e3e8ed; --bar:#c3d5e8;
+    --micro:#a8631a; --micro-soft:#f4e6d3; --pos:#1f7a4d; --neg:#b1362a;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --ground:#0e141a; --surface:#161e26; --surface-2:#1d2831; --ink:#e9eef3; --muted:#95a4b3; --faint:#6b7b8a;
+    --accent:#6aa9e0; --accent-ink:#8dc0ec; --accent-soft:#1d2e40; --hairline:#27313b; --bar:#2f465c;
+    --micro:#d69a4a; --micro-soft:#2a2114; --pos:#4cae82; --neg:#e07a6d;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:clamp(20px,4vw,44px) clamp(16px,4vw,32px) 72px}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 10px;font-weight:600}
+  h1{font-family:var(--serif);font-weight:600;font-size:clamp(26px,5vw,38px);line-height:1.1;letter-spacing:-.01em;margin:0 0 12px}
+  .lede{margin:0;color:var(--muted);font-size:15px;max-width:66ch}
+  .lede code{font-family:var(--mono);font-size:.92em;color:var(--ink)}
+
+  form{margin:26px 0 8px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .field{flex:1 1 240px;display:flex;flex-direction:column;gap:6px}
+  label.cap{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  input[type=text]{width:100%;font-family:var(--mono);font-size:20px;letter-spacing:.06em;text-transform:uppercase;padding:12px 14px;border:1px solid var(--hairline);border-radius:9px;background:var(--surface);color:var(--ink)}
+  input[type=text]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+  button.go{font-family:var(--sans);font-weight:600;font-size:15px;padding:12px 22px;border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#fff;cursor:pointer}
+  @media (prefers-color-scheme:dark){button.go{color:#0e141a}}
+  button.go:hover{filter:brightness(1.06)}
+  .examples{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:13px;color:var(--faint)}
+  .examples span{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  .chip{font-family:var(--mono);font-size:12.5px;padding:4px 9px;border-radius:999px;border:1px solid var(--hairline);background:var(--surface);color:var(--muted);cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+
+  .out{margin-top:26px;display:flex;flex-direction:column;gap:20px}
+  .card{background:var(--surface);border:1px solid var(--hairline);border-radius:13px;padding:20px 22px}
+  .subj-top{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:baseline}
+  .tk{font-family:var(--mono);font-size:24px;font-weight:600;letter-spacing:.04em;color:var(--accent-ink)}
+  .nm{font-family:var(--serif);font-size:20px;font-weight:600;flex:1 1 160px}
+  .pill{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:999px;font-weight:600}
+  .pill.nonmicro{background:var(--accent-soft);color:var(--accent-ink)}
+  .pill.micro{background:var(--micro-soft);color:var(--micro)}
+  .metarow{display:flex;flex-wrap:wrap;gap:10px 26px;width:100%;padding-top:12px;margin-top:10px;border-top:1px solid var(--hairline)}
+  .meta{display:flex;flex-direction:column;gap:3px}
+  .meta .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  .meta .v{font-size:15px;font-weight:500}
+  .meta .v.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  .val{display:flex;flex-wrap:wrap;gap:22px;align-items:stretch}
+  .val .big{flex:1 1 200px;display:flex;flex-direction:column;gap:4px}
+  .val .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  .val .num{font-family:var(--mono);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .val .sub{font-size:12.5px;color:var(--muted)}
+  .verdict{font-family:var(--mono);font-weight:600;font-size:14px}
+  .verdict.rich{color:var(--neg)} .verdict.cheap{color:var(--pos)}
+  .gauge{height:8px;border-radius:4px;background:var(--surface-2);position:relative;margin-top:6px;overflow:hidden}
+  .gauge .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--faint)}
+  .gauge .fillp{position:absolute;top:0;bottom:0;background:var(--neg);left:50%}
+  .gauge .filln{position:absolute;top:0;bottom:0;background:var(--pos);right:50%}
+
+  h2.sec{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:6px 0 10px;display:flex;gap:10px;align-items:baseline}
+  h2.sec .n{color:var(--accent)}
+  .tablewrap{overflow-x:auto;border:1px solid var(--hairline);border-radius:12px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;min-width:560px}
+  thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600;text-align:left;padding:10px 14px;border-bottom:1px solid var(--hairline);background:var(--surface-2)}
+  th.r,td.r{text-align:right}
+  tbody td{padding:10px 14px;border-bottom:1px solid var(--hairline);font-size:14px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.clickable{cursor:pointer}
+  tbody tr.clickable:hover td{background:var(--surface-2)}
+  td.tk{font-family:var(--mono);font-weight:600;color:var(--accent-ink);white-space:nowrap}
+  td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
+  .pos{color:var(--pos)} .neg{color:var(--neg)}
+
+  .selrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:2px 0 12px}
+  select{font-family:var(--mono);font-size:14px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--surface);color:var(--ink)}
+  .buildup{font-family:var(--mono);font-size:13.5px;color:var(--muted);margin:12px 2px 0;line-height:1.7}
+  .buildup b{color:var(--ink)}
+  .empty{padding:22px;border:1px dashed var(--hairline);border-radius:12px;background:var(--surface);color:var(--muted)}
+  .empty b{color:var(--ink);font-family:var(--mono)}
+  footer{margin-top:38px;padding-top:16px;border-top:1px solid var(--hairline);color:var(--faint);font-size:12.5px;line-height:1.6}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Comparable-Company Valuation &middot; 2025</p>
+  <h1>Value a firm by adjusted multiples</h1>
+  <p class="lede">Enter a ticker. The estimator takes the firm's size-and-industry peers, adjusts each peer's
+    EV/EBITDA multiple for how it differs from the target on operating characteristics
+    (<code>m<sub>j</sub> &times; exp&Sigma;<sub>k</sub>[g<sub>k</sub>(x<sub>i</sub>)&minus;g<sub>k</sub>(x<sub>j</sub>)]</code>),
+    and takes the median of the adjusted peer multiples as the fair multiple. Pick a peer to see its adjustment built up characteristic by characteristic.</p>
+
+  <form id="form" autocomplete="off">
+    <div class="field">
+      <label class="cap" for="tk">Ticker</label>
+      <input type="text" id="tk" name="tk" placeholder="AAPL" list="tickers" spellcheck="false" autocapitalize="characters">
+    </div>
+    <button class="go" type="submit">Value firm</button>
+    <datalist id="tickers"></datalist>
+  </form>
+  <p class="examples"><span>Try</span>
+    <button class="chip" type="button" data-tk="DPZ">DPZ</button>
+    <button class="chip" type="button" data-tk="CALM">CALM</button>
+    <button class="chip" type="button" data-tk="NKE">NKE</button>
+    <button class="chip" type="button" data-tk="AAPL">AAPL</button>
+  </p>
+
+  <div class="out" id="out" aria-live="polite"></div>
+
+  <footer>
+    Fair value from the interpretable (rung&nbsp;1) adjusted-multiple estimator: additive appraisal curves
+    <code>g<sub>k</sub></code> fit on 2001&ndash;2025 positive-EBITDA U.S.&nbsp;firms, applied to the 2025 cross-section.
+    Peers are the leave-one-out group of same-industry firms within a factor of two of the target's market cap.
+    Industry is handled by matching (a <span class="dot"></span> marks a same-sub-industry peer), so the additive
+    curves carry the adjustment. Illustrative; not investment advice.
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const out = $("#out");
+let PAYLOAD = null;
+
+const fmtMult = v => v==null ? "—" : v.toFixed(v>=100?0:v>=10?1:2)+"×";
+const fmtB = v => v==null ? "—" : "$"+(v>=100?v.toFixed(0):v>=10?v.toFixed(1):v.toFixed(2))+"bn";
+const fmtNum = (v,d=2) => v==null||!isFinite(v) ? "—" : Number(v).toFixed(d);
+const fmtSigned = (v,d=3) => v==null||!isFinite(v) ? "—" : (v>=0?"+":"")+v.toFixed(d);
+const fmtPct = v => v==null ? "—" : (v>=0?"+":"")+(v*100).toFixed(1)+"%";
+const esc = s => { const d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; };
+
+async function loadTickers(){
+  try{
+    const r = await fetch("/api/tickers"); const rows = await r.json();
+    const dl = $("#tickers");
+    rows.forEach(x => { const o=document.createElement("option"); o.value=x.ticker; o.label=x.name; dl.appendChild(o); });
+  }catch(e){}
+}
+
+function verdict(pct){
+  if(pct==null) return "";
+  const rich = pct>0;
+  const mag = Math.min(Math.abs(pct),1); // cap gauge at ±100%
+  const w = (mag*50).toFixed(1);
+  const label = rich
+    ? `Market prices it <b>${fmtPct(pct)}</b> above adjusted-multiple fair value (relatively rich)`
+    : `Market prices it <b>${fmtPct(pct)}</b> vs fair value (relatively cheap)`;
+  return `<div class="verdict ${rich?'rich':'cheap'}">${label}</div>
+    <div class="gauge"><div class="mid"></div>
+      ${rich?`<div class="fillp" style="width:${w}%"></div>`:`<div class="filln" style="width:${w}%"></div>`}
+    </div>`;
+}
+
+function renderPeerTable(p){
+  const rows = p.peers.map((pe,i)=>`
+    <tr>
+      <td class="tk">${esc(pe.ticker||'—')}</td>
+      <td>${esc(pe.name)}</td>
+      <td class="muted">${pe.same_industry?'<span class="dot" title="same sub-industry"></span>':''}${esc(pe.subindustry)}</td>
+      <td class="r mono">${fmtMult(pe.actual_multiple)}</td>
+      <td class="r mono ${pe.log_adjustment>=0?'pos':'neg'}">&times;${pe.adjustment_factor.toFixed(3)}</td>
+      <td class="r mono">${fmtMult(pe.adjusted_multiple)}</td>
+    </tr>`).join("");
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>Peer</th><th>Company</th><th>Sub-industry</th>
+      <th class="r">Its multiple</th><th class="r">Adjustment</th><th class="r">Adjusted</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function renderBreakdown(pe, target){
+  if(!pe) return "";
+  const rows = pe.breakdown.map(b=>`
+    <tr>
+      <td>${esc(b.label)}</td>
+      <td class="r mono">${fmtNum(b.xi,3)}</td>
+      <td class="r mono">${fmtNum(b.xj,3)}</td>
+      <td class="r mono">${fmtNum(b.gi,3)}</td>
+      <td class="r mono">${fmtNum(b.gj,3)}</td>
+      <td class="r mono ${b.dg>=0?'pos':'neg'}">${fmtSigned(b.dg,3)}</td>
+    </tr>`).join("");
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>Characteristic</th>
+      <th class="r">${esc(target.ticker)}</th><th class="r">${esc(pe.ticker)}</th>
+      <th class="r">g<sub>k</sub>(${esc(target.ticker)})</th><th class="r">g<sub>k</sub>(${esc(pe.ticker)})</th>
+      <th class="r">&Delta;g<sub>k</sub></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="buildup">${esc(pe.ticker)}'s multiple <b>${fmtMult(pe.actual_multiple)}</b>
+      &times; exp(&Sigma;&Delta;g<sub>k</sub> = <b>${fmtSigned(pe.log_adjustment,3)}</b>)
+      = &times;${pe.adjustment_factor.toFixed(3)}
+      &rarr; adjusted multiple <b>${fmtMult(pe.adjusted_multiple)}</b></div>`;
+}
+
+function render(p){
+  PAYLOAD = p;
+  const t = p.target;
+  const peerBlock = p.n_peers===0
+    ? `<div class="empty">${esc(t.ticker)} has no qualifying peers in 2025 (isolated firm) — no adjusted-multiple valuation.</div>`
+    : `
+      <div class="card">
+        <div class="val">
+          <div class="big"><span class="k">Fair EV/EBITDA</span><span class="num">${fmtMult(p.fair_multiple)}</span>
+            <span class="sub">median of ${p.n_peers} adjusted peer multiples</span></div>
+          <div class="big"><span class="k">Fair enterprise value</span><span class="num">${fmtB(p.ev_fair)}</span>
+            <span class="sub">fair multiple &times; EBITDA (${fmtB(t.ebitda)})</span></div>
+          <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(t.actual_multiple)}</span>
+            <span class="sub">actual EV ${fmtB(t.ev)}</span></div>
+        </div>
+        <div style="margin-top:14px">${verdict(p.pct_vs_fair)}</div>
+      </div>
+
+      <div>
+        <h2 class="sec">Peer set &amp; adjusted multiples <span class="n">${p.n_peers} firms</span></h2>
+        ${renderPeerTable(p)}
+      </div>
+
+      <div class="card">
+        <h2 class="sec" style="margin-top:0">Adjusted multiple, characteristic by characteristic</h2>
+        <div class="selrow">
+          <label class="cap" for="peersel">Peer</label>
+          <select id="peersel"></select>
+        </div>
+        <div id="breakdown"></div>
+      </div>`;
+
+  out.innerHTML = `
+    <div class="card">
+      <div class="subj-top">
+        <span class="tk">${esc(t.ticker)}</span>
+        <span class="nm">${esc(t.name)}</span>
+        <span class="pill ${t.sample==='micro'?'micro':'nonmicro'}">${t.sample==='micro'?'Microcap':'Non-microcap'}</span>
+      </div>
+      <div class="metarow">
+        <div class="meta"><span class="k">Sub-industry</span><span class="v">${esc(t.subindustry)}</span></div>
+        <div class="meta"><span class="k">Market cap</span><span class="v num">${fmtB(t.mktcap_b)}</span></div>
+        <div class="meta"><span class="k">EBITDA</span><span class="v num">${fmtB(t.ebitda)}</span></div>
+        <div class="meta"><span class="k">Enterprise value</span><span class="v num">${fmtB(t.ev)}</span></div>
+      </div>
+    </div>
+    ${peerBlock}`;
+
+  if(p.n_peers>0){
+    const sel = $("#peersel");
+    p.peers.forEach((pe,i)=>{ const o=document.createElement("option"); o.value=i;
+      o.textContent = `${pe.ticker} — ${pe.name}`; sel.appendChild(o); });
+    const draw = ()=> { $("#breakdown").innerHTML = renderBreakdown(p.peers[+sel.value], t); };
+    sel.addEventListener("change", draw); draw();
+  }
+}
+
+async function lookup(tk){
+  tk=(tk||"").trim().toUpperCase();
+  if(!tk){ out.innerHTML=""; return; }
+  out.innerHTML = `<div class="empty">Valuing <b>${esc(tk)}</b>…</div>`;
+  try{
+    const r = await fetch("/api/valuation/"+encodeURIComponent(tk));
+    if(r.status===404){ out.innerHTML = `<div class="empty">No firm with ticker <b>${esc(tk)}</b> in the 2025 sample. Try an example above.</div>`; return; }
+    render(await r.json());
+  }catch(e){ out.innerHTML = `<div class="empty">Error valuing <b>${esc(tk)}</b>: ${esc(e.message)}</div>`; }
+}
+
+$("#form").addEventListener("submit", e=>{ e.preventDefault(); lookup($("#tk").value); });
+document.querySelectorAll(".chip").forEach(c=> c.addEventListener("click", ()=>{ $("#tk").value=c.dataset.tk; lookup(c.dataset.tk); }));
+loadTickers().then(()=>{ $("#tk").value="DPZ"; lookup("DPZ"); });
+</script>
+</body>
+</html>
