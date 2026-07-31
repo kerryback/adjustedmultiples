@@ -65,13 +65,25 @@ def main():
         frames.append(p)
     panel = pd.concat(frames, ignore_index=True)
 
-    # --- g_k curves: feature -> (x_grid, g_k) sorted for interpolation ---
-    gk = pd.read_parquet(ROOT / "logmult" / "results" / "gk_curves_logmult_2001_2025.parquet")
-    curves = {}
-    for feat, sub in gk.groupby("feature"):
-        sub = sub.sort_values("x_grid")
-        curves[feat] = {"x": sub["x_grid"].astype(float).tolist(),
-                        "g": sub["g_k"].astype(float).tolist()}
+    # --- g_k curves for 2025 from the canonical store (single source of truth): the
+    #     full-sample (1-fold) fit + the 5 cross-fit folds, plus the saved fold membership ---
+    STORE = ROOT / "logmult" / "results" / "gk_store"
+
+    def curves_dict(df):
+        out = {}
+        for feat, sub in df.groupby("feature"):
+            sub = sub.sort_values("x_grid")
+            out[feat] = {"x": sub["x_grid"].astype(float).tolist(),
+                         "g": sub["g_k"].astype(float).tolist()}
+        return out
+
+    gk = pd.read_parquet(STORE / "gk_functions.parquet")
+    gk = gk[gk["year"] == 2025]
+    curves_full = curves_dict(gk[gk["fold"] == "full"])
+    curves_folds = {int(f): curves_dict(g) for f, g in gk[gk["fold"] != "full"].groupby("fold")}
+    fm = pd.read_parquet(STORE / "fold_membership.parquet")
+    fm = fm[fm["year"] == 2025]
+    fold_assign = dict(zip(fm["gvkey"].astype(str), fm["fold"].astype(int)))
 
     # --- assemble firm records (only firms present in BOTH panel and identity map) ---
     firms = {}
@@ -98,6 +110,7 @@ def main():
             "ebitda": round(ebitda / 1000.0, 4),   # $bn (panel stores $mm), consistent with mktcap_b
             "ev": round(ev / 1000.0, 4),            # $bn
             "multiple": round(ev / ebitda, 4),      # ratio, unit-independent
+            "fold": int(fold_assign.get(gv, -1)),   # cross-fit fold (non-micro 0-4; -1 = no fold)
             "chars": chars,
             "peers": [g for g in meta.get("peers", []) if g in idmap],
         }
@@ -109,13 +122,16 @@ def main():
     bundle = {
         "year": 2025,
         "features": [{"key": k, "label": lbl} for k, lbl in FEATURES],
-        "curves": curves,
+        "curves_full": curves_full,
+        "curves_folds": {str(f): c for f, c in curves_folds.items()},
+        "n_folds": len(curves_folds),
         "firms": list(firms.values()),
     }
     (OUT / "app_data.json").write_text(json.dumps(bundle))
     n_peers = np.median([len(f["peers"]) for f in firms.values()])
-    print(f"[prep] wrote {OUT/'app_data.json'}: {len(firms)} firms, median peers={n_peers:.0f}, "
-          f"{len(curves)} curves")
+    nf = sum(1 for f in firms.values() if f["fold"] >= 0)
+    print(f"[prep] wrote {OUT/'app_data.json'}: {len(firms)} firms ({nf} with a fold), "
+          f"median peers={n_peers:.0f}, full + {len(curves_folds)} fold curve sets")
     # examples
     for tk in ("AAPL", "CALM", "DPZ"):
         m = next((f for f in firms.values() if f["ticker"] == tk), None)

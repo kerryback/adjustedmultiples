@@ -1,32 +1,21 @@
-"""build_ml_frontier.py — ML-frontier (direct general-g LightGBM) peer-weight view for the app.
+"""build_ml_frontier.py — ML-frontier (direct general-g LightGBM) peer-weight matrices for
+the app, on the 2025 cross-section, BOTH ways:
+  full  = single L2 GBM fit on all 2025 firms (1-fold) -> weight matrix S_full (has self-weights)
+  cv    = 5-fold cross-fit (paper's stratified folds; a firm valued by the model trained on the
+          other 4 folds) -> weight matrix S_cv. A firm's own fold (incl. itself) gets ZERO weight,
+          so there is no self-weight, matching the paper's target-fold-pure discipline.
 
-Our machine-learning frontier is a LightGBM that predicts the log multiple t=log(EV/EBITDA)
-directly from the 21 operating characteristics + GICS sub-industry (the paper's "direct
-method, general g"). Following Geertsema-Lu (App A.3), a squared-error gradient-boosted
-prediction can be written EXACTLY as a weighted average of the training firms' target
-multiples, with weights built from how often the target and each firm co-occupy the same
-LightGBM leaf across boosting iterations (scaled by the learning rate, normalized by leaf
-size + reg_lambda). We expose those weights per firm.
+Our ML frontier is a LightGBM predicting t=log(EV/EBITDA) from 21 characteristics + GICS sub-
+industry. A squared-error (L2) gradient-boosted prediction is EXACTLY a weighted average of the
+TRAINING firms' target multiples (Geertsema-Lu App A.3): weight = accumulated leaf co-membership
+across boosting iterations, scaled by the learning rate, normalized by leaf size + reg_lambda. We
+use L2 (median-loss L1 is not a linear smoother, so it has no per-firm weights) and no bagging (so
+each tree's leaf value is the mean over ALL its leaf-mates -> weights exact). Same folds as rung-1
+(gk_2025_fold_assign.parquet). Everything else = the paper's frontier params.
 
-Model = the paper's frontier architecture (same 21+1 features, 400 trees, lr 0.05,
-num_leaves 31, min_child_samples 50, reg_lambda 1), with TWO changes required to make the
-decomposition an EXACT, reproducible weighted average of peer multiples:
-  * objective = "regression" (squared error) instead of regression_l1 — the median-loss
-    frontier is not a linear smoother of the target, so its prediction cannot be written as
-    a weighted average; L2 can. (L1 vs L2 fitted t correlate ~0.94 on 2025; reported below.)
-  * subsample = colsample_bytree = 1 (no bagging) — so each tree's leaf value is the mean
-    over ALL its leaf-mates, making the leaf-membership weights exact.
-Single full-sample fit on the 2025 non-micro positive-EBITDA cross-section (a reporting fit,
-like the g_k curves), so each firm's fair multiple is a weighted average of the other 2025
-firms' multiples.
-
-Outputs (valuation_app/data/):
-  ml_frontier.npz         COMPACT app payload: weight matrix S (float32, n x n), tickers (firm
-                          order), per-firm EV/EBITDA multiple and frontier fair multiple. The app
-                          slices a ticker's row on demand and joins names from app_data.json.
-  ml_frontier_leaves.npz  raw leaf memberships (n x n_trees), weight matrix S, learning_rate,
-                          gvkeys — the saved leaf memberships + weights + learning rate
-                          (LOCAL/reproducibility only; gitignored, not deployed).
+Output (valuation_app/data/):
+  ml_frontier.npz  S_full, S_cv (float32, n x n), tickers, multiple, fair_full, fair_cv, fold
+  ml_frontier_leaves.npz  (LOCAL/reproducibility, gitignored): full-fit leaves + S_full + lr
 """
 import json
 from pathlib import Path
@@ -36,7 +25,8 @@ import lightgbm as lgb
 
 ROOT = Path("/Users/kerryback/repos/multiples/workspace")
 PANEL = ROOT / "extend2000/data/panel_nonmicro.parquet"
-ARTIFACT = ROOT / "logmult/artifact_data_2025.json"   # ticker/name/subindustry per gvkey
+ARTIFACT = ROOT / "logmult/artifact_data_2025.json"
+FOLD_ASSIGN = ROOT / "logmult/results/gk_store/fold_membership.parquet"   # canonical folds (2025)
 OUT = ROOT / "valuation_app/data"
 
 SPLINE_FEATS = ["f_grossmargin", "f_ebitdamargin", "f_roa", "f_assetturn", "f_salegrow",
@@ -45,94 +35,109 @@ SPLINE_FEATS = ["f_grossmargin", "f_ebitdamargin", "f_roa", "f_assetturn", "f_sa
                 "f_accruals", "f_profitflag", "f_ebitdapos", "f_age", "log_at", "log_sale"]
 CAT_FEAT = "gsubind_code"
 LGB_FEATS = SPLINE_FEATS + [CAT_FEAT]
-LR = 0.05
-LAMBDA = 1.0     # reg_lambda -> leaf value = lr * sum(residual)/(n_leaf + lambda)
-N_TREES = 400
-EPS = 1e-6       # weight magnitude below which we treat a firm as zero-weight
+LR, LAMBDA, N_TREES, K, EPS = 0.05, 1.0, 400, 5, 1e-6
+LGB = dict(objective="regression", n_estimators=N_TREES, learning_rate=LR, num_leaves=31,
+           min_child_samples=50, subsample=1.0, colsample_bytree=1.0, reg_lambda=LAMBDA,
+           random_state=42, n_jobs=-1, verbosity=-1, deterministic=True, force_row_wise=True)
 
 # ---- 2025 cross-section ----
 d = pd.read_parquet(PANEL)
 d = d[(d.valyear == 2025) & (d.ebitda_yield > 0)].reset_index(drop=True).copy()
-d["t"] = -np.log(d["ebitda_yield"])           # log(EV/EBITDA)
-d["multiple"] = 1.0 / d["ebitda_yield"]       # EV/EBITDA
+d["t"] = -np.log(d["ebitda_yield"]); d["multiple"] = 1.0 / d["ebitda_yield"]
 d[CAT_FEAT] = d["gsubind"].astype("category").cat.codes.astype(int)
 gvk = d["gvkey"].astype(str).to_numpy()
-t = d["t"].to_numpy(float)
-n = len(d)
-print(f"2025 non-micro positive-EBITDA firms: {n}")
+t = d["t"].to_numpy(float); n = len(d)
+X = d[LGB_FEATS].copy(); X[CAT_FEAT] = X[CAT_FEAT].astype("category")
 
-X = d[LGB_FEATS].copy()
-X[CAT_FEAT] = X[CAT_FEAT].astype("category")
-
-# ---- fit the frontier model (L2, no bagging) ----
-model = lgb.LGBMRegressor(objective="regression", n_estimators=N_TREES, learning_rate=LR,
-                          num_leaves=31, min_child_samples=50, subsample=1.0,
-                          colsample_bytree=1.0, reg_lambda=LAMBDA, random_state=42,
-                          n_jobs=-1, verbosity=-1, deterministic=True, force_row_wise=True)
-model.fit(X, t, categorical_feature=[CAT_FEAT])
-leaves = model.predict(X, pred_leaf=True)      # (n, N_TREES) leaf index per tree
-raw = model.predict(X, raw_score=True)         # fitted log multiple (frontier prediction)
-
-# sanity vs the paper's L1 frontier fitted on the same 2025 firms
-mL1 = lgb.LGBMRegressor(objective="regression_l1", n_estimators=N_TREES, learning_rate=LR,
-                        num_leaves=31, min_child_samples=50, subsample=0.8, subsample_freq=1,
-                        colsample_bytree=0.8, reg_lambda=1.0, random_state=42, n_jobs=-1,
-                        verbosity=-1, deterministic=True, force_row_wise=True)
-mL1.fit(X, t, categorical_feature=[CAT_FEAT])
-print(f"corr(L2 fit, L1 frontier fit) on 2025 = {np.corrcoef(raw, mL1.predict(X))[0,1]:.4f}")
-
-# ---- exact leaf-membership weight matrix S:  raw = S @ t,  rows sum ~1 ----
-# S = B + sum_m lr * A_m * (prod_{l<m}(I - lr A_l)) (I - B),  A_m = leaf-mean(+lambda) operator
-B = np.full((n, n), 1.0 / n)
-S = B.copy()
-Rop = np.eye(n) - B                            # residual operator after the mean init
-for m in range(N_TREES):
-    lv = leaves[:, m]
-    AR = np.empty((n, n))
-    for lf in np.unique(lv):
-        idx = np.where(lv == lf)[0]
-        AR[idx, :] = Rop[idx, :].sum(axis=0) / (len(idx) + LAMBDA)
-    S += LR * AR
-    Rop -= LR * AR
-
-recon = S @ t
-print(f"reconstruction max|S t - raw| = {np.max(np.abs(recon - raw)):.2e}  "
-      f"(mean {np.mean(np.abs(recon - raw)):.2e})")
-print(f"row-sum of S: min {S.sum(1).min():.4f} max {S.sum(1).max():.4f} (should be ~1)")
-
-# ---- identity: ticker / name / subindustry (name/subindustry not stored; app joins them) ----
+fa = pd.read_parquet(FOLD_ASSIGN)
+fa = fa[fa["year"] == 2025].set_index("gvkey")["fold"]
+fold = np.array([int(fa.loc[g]) for g in gvk])       # canonical 2025 folds (== rung-1)
 firms = {r["gvkey"]: r for r in json.load(open(ARTIFACT))["firms"]}
 tick = np.array([firms.get(g, {}).get("ticker") or "" for g in gvk], dtype=object)
-name = np.array([firms.get(g, {}).get("name") for g in gvk], dtype=object)
-subind = np.array([firms.get(g, {}).get("subindustry") for g in gvk], dtype=object)
 mult = d["multiple"].to_numpy(float)
-fair = np.exp(raw)
+print(f"2025 firms N={n}; fold sizes={np.bincount(fold).tolist()}")
 
-# ---- COMPACT app payload: the weight matrix + per-firm arrays; the app computes each
-# ticker's peer list on demand and joins names from app_data.json (avoids a 300MB+ JSON
-# that duplicates names across 1474 x 1472 pairs). S as float32 (~8.7MB).
+
+def leaf_mean_apply(leaves_row, R, lam):
+    """A@R where A is the leaf-mean(+lam) operator over the ROWS indexing R (train firms).
+    Returns per-leaf group means keyed for scatter."""
+    grp = {}
+    for lf in np.unique(leaves_row):
+        idx = np.where(leaves_row == lf)[0]
+        grp[lf] = R[idx, :].sum(0) / (len(idx) + lam)
+    return grp
+
+
+def smoother_full(leaves, lam):
+    """Exact in-sample smoother S (n x n): raw = S @ t, rows sum to 1."""
+    m = leaves.shape[0]
+    B = np.full((m, m), 1.0 / m)
+    S = B.copy(); R = np.eye(m) - B
+    for j in range(leaves.shape[1]):
+        grp = leaf_mean_apply(leaves[:, j], R, lam)
+        AR = np.empty((m, m))
+        for lf, g in grp.items():
+            AR[leaves[:, j] == lf, :] = g
+        S += LR * AR; R -= LR * AR
+    return S
+
+
+def smoother_cv_fold(leaves_tr, leaves_te, lam):
+    """OOS smoother W (n_te x n_tr): raw_test = W @ t_train, over TRAIN firms only."""
+    ntr = leaves_tr.shape[0]; nte = leaves_te.shape[0]
+    W = np.full((nte, ntr), 1.0 / ntr)
+    R = np.eye(ntr) - np.full((ntr, ntr), 1.0 / ntr)
+    for j in range(leaves_tr.shape[1]):
+        grp = leaf_mean_apply(leaves_tr[:, j], R, lam)          # keyed by leaf, over train rows
+        AR_tr = np.empty((ntr, ntr)); AR_te = np.zeros((nte, ntr))
+        lt, le = leaves_tr[:, j], leaves_te[:, j]
+        for lf, g in grp.items():
+            AR_tr[lt == lf, :] = g
+            te_idx = np.where(le == lf)[0]
+            if len(te_idx):
+                AR_te[te_idx, :] = g
+        W += LR * AR_te; R -= LR * AR_tr
+    return W
+
+
+# ---- FULL (1-fold) ----
+m_full = lgb.LGBMRegressor(**LGB).fit(X, t, categorical_feature=[CAT_FEAT])
+raw_full = m_full.predict(X, raw_score=True)
+S_full = smoother_full(m_full.predict(X, pred_leaf=True), LAMBDA)
+print(f"[full] reconstruction max|S t - raw| = {np.max(np.abs(S_full @ t - raw_full)):.2e}; "
+      f"row-sum in [{S_full.sum(1).min():.4f},{S_full.sum(1).max():.4f}]")
+
+# ---- CV (5-fold cross-fit) ----
+S_cv = np.zeros((n, n)); raw_cv = np.full(n, np.nan)
+for f in range(K):
+    tr = np.where(fold != f)[0]; te = np.where(fold == f)[0]
+    mf = lgb.LGBMRegressor(**LGB).fit(X.iloc[tr], t[tr], categorical_feature=[CAT_FEAT])
+    raw_cv[te] = mf.predict(X.iloc[te], raw_score=True)
+    W = smoother_cv_fold(mf.predict(X.iloc[tr], pred_leaf=True),
+                         mf.predict(X.iloc[te], pred_leaf=True), LAMBDA)
+    S_cv[np.ix_(te, tr)] = W        # test firms get weights over their training folds only
+recon_cv = (S_cv @ t)
+print(f"[cv]   reconstruction max|S_cv t - raw_cv| = {np.max(np.abs(recon_cv - raw_cv)):.2e}; "
+      f"self-weight max |diag| = {np.max(np.abs(np.diag(S_cv))):.2e} (should be 0)")
+
 np.savez_compressed(OUT / "ml_frontier.npz",
-                    S=S.astype(np.float32),
-                    tickers=tick.astype(str),
-                    multiple=mult.astype(np.float32),
-                    fair=fair.astype(np.float32))
-# ---- reproducibility archive (LOCAL only; gitignored, not deployed): raw leaf memberships ----
-np.savez_compressed(OUT / "ml_frontier_leaves.npz", leaves=leaves, S=S, learning_rate=LR,
-                    gvkeys=gvk, tickers=tick.astype(str))
-print(f"\nwrote ml_frontier.npz (app payload) + ml_frontier_leaves.npz (reproducibility)")
+                    S_full=S_full.astype(np.float32), S_cv=S_cv.astype(np.float32),
+                    tickers=tick.astype(str), multiple=mult.astype(np.float32),
+                    fair_full=np.exp(raw_full).astype(np.float32),
+                    fair_cv=np.exp(raw_cv).astype(np.float32),
+                    fold=fold.astype(np.int8))
+np.savez_compressed(OUT / "ml_frontier_leaves.npz", leaves=m_full.predict(X, pred_leaf=True),
+                    S_full=S_full, S_cv=S_cv, learning_rate=LR, gvkeys=gvk, tickers=tick.astype(str),
+                    fold=fold)
+print("wrote ml_frontier.npz (S_full + S_cv) + ml_frontier_leaves.npz")
 
-# ---- worked example ----
-for ex in ["AAPL"]:
-    idx = np.where(tick == ex)[0]
-    if len(idx):
-        i = int(idx[0]); w = S[i, :]
-        keep = [j for j in np.argsort(-np.abs(w)) if j != i and abs(w[j]) >= EPS and tick[j]]
-        top = keep[:12]
-        cum = (abs(w[i]) + sum(abs(w[j]) for j in top)) / (abs(w[i]) + sum(abs(w[j]) for j in keep))
-        print(f"\n{ex}: {name[i]} | {subind[i]} | actual {mult[i]:.1f}x -> frontier fair {fair[i]:.1f}x")
-        print(f"  self-weight {w[i]:+.3f}; {len(keep)} firms with nonzero weight; "
-              f"self+top12 = {cum:.0%} of total |weight|")
-        print(f"  {'ticker':7}{'weight':>9}  {'EV/EBITDA':>9}  subindustry / name")
-        for j in top:
-            print(f"  {tick[j]:7}{w[j]:+9.4f}  {mult[j]:9.1f}  "
-                  f"{(subind[j] or '')[:26]:26} {(name[j] or '')[:24]}")
+# ---- worked example: AAPL both ways ----
+for ex in ["AAPL", "DPZ"]:
+    i = np.where(tick == ex)[0]
+    if not len(i):
+        continue
+    i = int(i[0])
+    for lbl, Smat, fair in [("full", S_full, np.exp(raw_full)), ("cv", S_cv, np.exp(raw_cv))]:
+        w = Smat[i]; nz = [j for j in np.argsort(-np.abs(w)) if j != i and abs(w[j]) >= EPS and tick[j]]
+        print(f"{ex} [{lbl:4}] fold={fold[i]} fair {fair[i]:.1f}x  self {w[i]:+.3f}  "
+              f"{len(nz)} nonzero; top: " + ", ".join(f"{tick[j]}={w[j]:+.3f}" for j in nz[:5]))
