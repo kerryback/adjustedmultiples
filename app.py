@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 APP_DIR = Path(__file__).parent
@@ -45,18 +45,6 @@ else:
     F_TICK, F_IDX = [], {}
 
 app = FastAPI(title="Adjusted-Multiple Valuation")
-
-CANONICAL_HOST = "adjustedmultiples.com"
-
-
-@app.middleware("http")
-async def redirect_www(request, call_next):
-    """Send www.<canonical> traffic to the bare domain; both are served by Koyeb."""
-    host = request.headers.get("host", "").split(":")[0].lower()
-    if host == "www." + CANONICAL_HOST:
-        url = request.url.replace(netloc=CANONICAL_HOST, scheme="https")
-        return RedirectResponse(str(url), status_code=301)
-    return await call_next(request)
 
 
 def gk(cs: dict, feat: str, x):
