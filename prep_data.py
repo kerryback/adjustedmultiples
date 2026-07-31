@@ -65,8 +65,9 @@ def main():
         frames.append(p)
     panel = pd.concat(frames, ignore_index=True)
 
-    # --- g_k curves for 2025 from the canonical store (single source of truth): the
-    #     full-sample (1-fold) fit + the 5 cross-fit folds, plus the saved fold membership ---
+    # --- g_k curves for 2025 from the canonical store (single source of truth), PER SAMPLE:
+    #     the paper estimates non-micro and micro separately, so each sample has its own
+    #     full-sample (1-fold) fit, its own 5 cross-fit folds, and its own fold membership ---
     STORE = ROOT / "logmult" / "results" / "gk_store"
 
     def curves_dict(df):
@@ -77,13 +78,23 @@ def main():
                          "g": sub["g_k"].astype(float).tolist()}
         return out
 
-    gk = pd.read_parquet(STORE / "gk_functions.parquet")
-    gk = gk[gk["year"] == 2025]
-    curves_full = curves_dict(gk[gk["fold"] == "full"])
-    curves_folds = {int(f): curves_dict(g) for f, g in gk[gk["fold"] != "full"].groupby("fold")}
-    fm = pd.read_parquet(STORE / "fold_membership.parquet")
-    fm = fm[fm["year"] == 2025]
-    fold_assign = dict(zip(fm["gvkey"].astype(str), fm["fold"].astype(int)))
+    STORE_FILES = {  # sample -> (gk_functions, fold_membership)
+        "nonmicro": ("gk_functions.parquet", "fold_membership.parquet"),
+        "micro":    ("gk_functions_micro.parquet", "fold_membership_micro.parquet"),
+    }
+    curves = {}
+    fold_assign = {}   # gvkey -> fold (gvkeys are disjoint across samples)
+    for samp, (gkf, fmf) in STORE_FILES.items():
+        gk = pd.read_parquet(STORE / gkf)
+        gk = gk[gk["year"] == 2025]
+        curves[samp] = {
+            "full": curves_dict(gk[gk["fold"] == "full"]),
+            "folds": {str(int(f)): curves_dict(g) for f, g in gk[gk["fold"] != "full"].groupby("fold")},
+        }
+        fm = pd.read_parquet(STORE / fmf)
+        fm = fm[fm["year"] == 2025]
+        fold_assign.update(dict(zip(fm["gvkey"].astype(str), fm["fold"].astype(int))))
+    n_folds = len(curves["nonmicro"]["folds"])
 
     # --- assemble firm records (only firms present in BOTH panel and identity map) ---
     firms = {}
@@ -122,16 +133,18 @@ def main():
     bundle = {
         "year": 2025,
         "features": [{"key": k, "label": lbl} for k, lbl in FEATURES],
-        "curves_full": curves_full,
-        "curves_folds": {str(f): c for f, c in curves_folds.items()},
-        "n_folds": len(curves_folds),
+        "curves": curves,           # {sample: {"full": {...}, "folds": {"0".."4": {...}}}}
+        "n_folds": n_folds,
         "firms": list(firms.values()),
     }
     (OUT / "app_data.json").write_text(json.dumps(bundle))
-    n_peers = np.median([len(f["peers"]) for f in firms.values()])
-    nf = sum(1 for f in firms.values() if f["fold"] >= 0)
-    print(f"[prep] wrote {OUT/'app_data.json'}: {len(firms)} firms ({nf} with a fold), "
-          f"median peers={n_peers:.0f}, full + {len(curves_folds)} fold curve sets")
+    for samp in curves:
+        fs = [f for f in firms.values() if f["sample"] == samp]
+        nf = sum(1 for f in fs if f["fold"] >= 0)
+        npr = np.median([len(f["peers"]) for f in fs]) if fs else 0
+        print(f"[prep] {samp}: {len(fs)} firms ({nf} with a fold), median peers={npr:.0f}, "
+              f"full + {len(curves[samp]['folds'])} fold curve sets")
+    print(f"[prep] wrote {OUT/'app_data.json'}: {len(firms)} firms total")
     # examples
     for tk in ("AAPL", "CALM", "DPZ"):
         m = next((f for f in firms.values() if f["ticker"] == tk), None)

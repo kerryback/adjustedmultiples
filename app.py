@@ -24,25 +24,23 @@ APP_DIR = Path(__file__).parent
 DATA = json.loads((APP_DIR / "data" / "app_data.json").read_text())
 FIRMS = {f["gvkey"]: f for f in DATA["firms"]}
 BY_TICKER = {f["ticker"].upper(): f for f in DATA["firms"] if f.get("ticker")}
-CURVES_FULL = DATA["curves_full"]      # {feat: {x, g}}  full-sample (1-fold) 2025 fit
-CURVES_FOLDS = DATA["curves_folds"]    # {"0".."4": {feat: {x, g}}}  the 5 cross-fit fold models
+CURVES = DATA["curves"]      # {sample: {"full": {feat:{x,g}}, "folds": {"0".."4": {feat:{x,g}}}}}
 FEATURES = DATA["features"]  # [{key,label}, ...] in presentation order
 
-# ML-frontier (squared-error direct-general-g GBM) peer-weight matrices, both on 2025:
+# ML-frontier (squared-error direct-general-g GBM) peer-weight matrices, per sample, both on 2025:
 #   full  = single in-sample fit (has self-weights);  5fold = cross-fit (no self-weight).
-# A ticker's peer list is computed on demand from its row; names joined from app_data.
+# The paper estimates each sample separately, so a ticker routes to its own sample's matrices.
 _FRONTIER_FILE = APP_DIR / "data" / "ml_frontier.npz"
 F_EPS = 1e-6
+F_S, F_FAIR, F_TICK, F_MULT, F_IDX = {}, {}, {}, {}, {}
 if _FRONTIER_FILE.exists():
     _fz = np.load(_FRONTIER_FILE, allow_pickle=False)
-    F_S = {"full": _fz["S_full"], "5fold": _fz["S_cv"]}
-    F_FAIR = {"full": _fz["fair_full"], "5fold": _fz["fair_cv"]}
-    F_TICK = [str(t) for t in _fz["tickers"]]
-    F_MULT = _fz["multiple"]
-    F_IDX = {t.upper(): i for i, t in enumerate(F_TICK) if t}
-else:
-    F_S = F_FAIR = F_MULT = None
-    F_TICK, F_IDX = [], {}
+    for _s in (str(s) for s in _fz["samples"]):
+        F_S[_s] = {"full": _fz[f"S_full_{_s}"], "5fold": _fz[f"S_cv_{_s}"]}
+        F_FAIR[_s] = {"full": _fz[f"fair_full_{_s}"], "5fold": _fz[f"fair_cv_{_s}"]}
+        F_TICK[_s] = [str(t) for t in _fz[f"tickers_{_s}"]]
+        F_MULT[_s] = _fz[f"multiple_{_s}"]
+        F_IDX[_s] = {t.upper(): i for i, t in enumerate(F_TICK[_s]) if t}
 
 app = FastAPI(title="Adjusted-Multiple Valuation")
 
@@ -58,11 +56,13 @@ def gk(cs: dict, feat: str, x):
 
 
 def curves_for(t: dict, method: str) -> dict:
-    """The paper applies the target's fold-out model g_{-f} to the target AND its peers.
-    Full-sample (or a firm without a fold, e.g. microcap) uses the single 1-fold curves."""
+    """The paper applies the target's fold-out model g_{-f} to the target AND its peers,
+    from the target's OWN sample (non-micro or micro). Full-sample (or a firm without a
+    fold) uses that sample's single 1-fold curves."""
+    cs = CURVES[t["sample"]]
     if method == "5fold" and t.get("fold", -1) >= 0:
-        return CURVES_FOLDS[str(t["fold"])]
-    return CURVES_FULL
+        return cs["folds"][str(t["fold"])]
+    return cs["full"]
 
 
 def value_target(t: dict, method: str) -> dict:
@@ -141,26 +141,30 @@ def valuation(ticker: str, method: str = "5fold"):
 def frontier(ticker: str, method: str = "5fold"):
     method = _method(method)
     key = ticker.strip().upper()
-    i = F_IDX.get(key)
+    ti = BY_TICKER.get(key)
+    if ti is None:
+        raise HTTPException(status_code=404, detail=f"No firm with ticker '{ticker}' in the 2025 sample.")
+    s = ti["sample"]                       # route to the firm's own sample's frontier
+    i = F_IDX.get(s, {}).get(key)
     if i is None:
         raise HTTPException(status_code=404,
                             detail=f"No machine-learning frontier decomposition for '{ticker}'.")
-    w = F_S[method][i]
+    tick, mult, fair = F_TICK[s], F_MULT[s], F_FAIR[s]
+    w = F_S[s][method][i]
     peers = []
     for j in np.argsort(-np.abs(w)):
         j = int(j)
         if j == i or abs(float(w[j])) < F_EPS:
             continue
-        tk = F_TICK[j]
+        tk = tick[j]
         meta = BY_TICKER.get(tk.upper(), {})
         peers.append({"ticker": tk, "name": meta.get("name"),
                       "subindustry": meta.get("subindustry"),
-                      "multiple": round(float(F_MULT[j]), 2),
+                      "multiple": round(float(mult[j]), 2),
                       "weight": round(float(w[j]), 6)})
-    ti = BY_TICKER.get(key, {})
-    return {"method": method, "name": ti.get("name"), "subindustry": ti.get("subindustry"),
-            "actual_multiple": round(float(F_MULT[i]), 2),
-            "fair_multiple": round(float(F_FAIR[method][i]), 2),
+    return {"method": method, "sample": s, "name": ti.get("name"), "subindustry": ti.get("subindustry"),
+            "actual_multiple": round(float(mult[i]), 2),
+            "fair_multiple": round(float(fair[method][i]), 2),
             "self_weight": round(float(w[i]), 6),
             "n_nonzero": len(peers), "peers": peers}
 
