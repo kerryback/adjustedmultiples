@@ -135,6 +135,7 @@ const fmtB = v => v==null ? "—" : "$"+(v>=100?v.toFixed(0):v>=10?v.toFixed(1):
 const fmtNum = (v,d=2) => v==null||!isFinite(v) ? "—" : Number(v).toFixed(d);
 const fmtSigned = (v,d=3) => v==null||!isFinite(v) ? "—" : (v>=0?"+":"")+v.toFixed(d);
 const fmtPct = v => v==null ? "—" : (v>=0?"+":"")+(v*100).toFixed(1)+"%";
+const fmtW = v => v==null ? "—" : (v>=0?"+":"")+(v*100).toFixed(2)+"%";
 const esc = s => { const d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; };
 
 async function loadTickers(){
@@ -244,7 +245,8 @@ function render(p){
         <div class="meta"><span class="k">Enterprise value</span><span class="v num">${fmtB(t.ev)}</span></div>
       </div>
     </div>
-    ${peerBlock}`;
+    ${peerBlock}
+    <div id="frontier"></div>`;
 
   if(p.n_peers>0){
     const sel = $("#peersel");
@@ -255,6 +257,53 @@ function render(p){
   }
 }
 
+const F_TOPN = 25;
+function frontierRows(list){
+  return list.map(pe=>`
+    <tr>
+      <td class="tk">${esc(pe.ticker||'—')}</td>
+      <td>${esc(pe.name)}</td>
+      <td class="muted">${esc(pe.subindustry)}</td>
+      <td class="r mono">${fmtMult(pe.multiple)}</td>
+      <td class="r mono ${pe.weight>=0?'pos':'neg'}">${fmtW(pe.weight)}</td>
+    </tr>`).join("");
+}
+function renderFrontier(host, f, tk){
+  const peers = f.peers || [];
+  const table = `<div class="tablewrap"><table>
+    <thead><tr><th>Firm</th><th>Company</th><th>Sub-industry</th>
+      <th class="r">EV/EBITDA</th><th class="r">Weight</th></tr></thead>
+    <tbody id="fbody">${frontierRows(peers.slice(0,F_TOPN))}</tbody></table></div>`;
+  const more = peers.length>F_TOPN
+    ? `<div class="selrow"><button class="chip" id="fshowall">Show all ${peers.length} firms</button></div>` : "";
+  host.innerHTML = `
+    <div class="card">
+      <h2 class="sec" style="margin-top:0">Machine-learning frontier <span class="n">peer weights</span></h2>
+      <p class="lede" style="font-size:13.5px;margin:0 0 14px">
+        The flexible ML frontier (a gradient-boosted model, squared-error loss) values ${esc(tk)} as a
+        weighted average of the cross-section's multiples: fair EV/EBITDA <b>${fmtMult(f.fair_multiple)}</b>.
+        ${esc(tk)}'s own multiple carries <b>${fmtW(f.self_weight)}</b> of the weight, and
+        <b>${f.n_nonzero}</b> firms carry nonzero weight — a diffuse web, in contrast to the ~${PAYLOAD?PAYLOAD.n_peers:''} named
+        peers above. Weights sum to 100% and reconstruct the fair value exactly.
+      </p>
+      ${table}${more}
+    </div>`;
+  if(peers.length>F_TOPN){
+    $("#fshowall").addEventListener("click", ()=>{
+      $("#fbody").innerHTML = frontierRows(peers);
+      const b=$("#fshowall"); if(b&&b.parentElement) b.parentElement.remove();
+    });
+  }
+}
+async function loadFrontier(tk){
+  const host = $("#frontier"); if(!host) return;
+  try{
+    const r = await fetch("/api/frontier/"+encodeURIComponent(tk));
+    if(!r.ok){ host.innerHTML=""; return; }
+    renderFrontier(host, await r.json(), tk);
+  }catch(e){ host.innerHTML=""; }
+}
+
 async function lookup(tk){
   tk=(tk||"").trim().toUpperCase();
   if(!tk){ out.innerHTML=""; return; }
@@ -263,6 +312,7 @@ async function lookup(tk){
     const r = await fetch("/api/valuation/"+encodeURIComponent(tk));
     if(r.status===404){ out.innerHTML = `<div class="empty">No firm with ticker <b>${esc(tk)}</b> in the 2025 sample. Try an example above.</div>`; return; }
     render(await r.json());
+    loadFrontier(tk);
   }catch(e){ out.innerHTML = `<div class="empty">Error valuing <b>${esc(tk)}</b>: ${esc(e.message)}</div>`; }
 }
 
