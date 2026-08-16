@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Adjusted-Multiple Valuation</title>
+<title>Valuation by Multiples</title>
 <style>
   :root{
     --ground:#f6f8fa; --surface:#fff; --surface-2:#eef2f6; --ink:#15202b; --muted:#5c6b7a; --faint:#8090a0;
     --accent:#235a92; --accent-ink:#1b4a7c; --accent-soft:#dce7f2; --hairline:#e3e8ed; --bar:#c3d5e8;
     --micro:#a8631a; --micro-soft:#f4e6d3; --pos:#1f7a4d; --neg:#b1362a;
+    --scrim:rgba(12,22,32,.44);
     --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
@@ -17,6 +18,7 @@
     --ground:#0e141a; --surface:#161e26; --surface-2:#1d2831; --ink:#e9eef3; --muted:#95a4b3; --faint:#6b7b8a;
     --accent:#6aa9e0; --accent-ink:#8dc0ec; --accent-soft:#1d2e40; --hairline:#27313b; --bar:#2f465c;
     --micro:#d69a4a; --micro-soft:#2a2114; --pos:#4cae82; --neg:#e07a6d;
+    --scrim:rgba(0,0,0,.6);
   }}
   *{box-sizing:border-box}
   body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -39,8 +41,9 @@
   .chip{font-family:var(--mono);font-size:12.5px;padding:4px 9px;border-radius:999px;border:1px solid var(--hairline);background:var(--surface);color:var(--muted);cursor:pointer}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
 
-  .out{margin-top:26px;display:flex;flex-direction:column;gap:20px}
   .card{background:var(--surface);border:1px solid var(--hairline);border-radius:13px;padding:20px 22px}
+  #subject{margin-top:26px}
+  #subject:empty{margin-top:0}
   .subj-top{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:baseline}
   .tk{font-family:var(--mono);font-size:24px;font-weight:600;letter-spacing:.04em;color:var(--accent-ink)}
   .nm{font-family:var(--serif);font-size:20px;font-weight:600;flex:1 1 160px}
@@ -65,27 +68,34 @@
   .gauge .fillp{position:absolute;top:0;bottom:0;background:var(--neg);left:50%}
   .gauge .filln{position:absolute;top:0;bottom:0;background:var(--pos);right:50%}
 
-  h2.sec{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:6px 0 10px;display:flex;gap:10px;align-items:baseline}
+  h2.sec{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:6px 0 10px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
   h2.sec .n{color:var(--accent)}
+  h2.sec .hint{font-family:var(--sans);font-size:12.5px;letter-spacing:0;text-transform:none;color:var(--faint);font-weight:400}
   .tablewrap{overflow-x:auto;border:1px solid var(--hairline);border-radius:12px;background:var(--surface)}
   table{border-collapse:collapse;width:100%;min-width:560px}
   thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600;text-align:left;padding:10px 14px;border-bottom:1px solid var(--hairline);background:var(--surface-2)}
   th.r,td.r{text-align:right}
   tbody td{padding:10px 14px;border-bottom:1px solid var(--hairline);font-size:14px}
   tbody tr:last-child td{border-bottom:none}
-  tbody tr.clickable{cursor:pointer}
-  tbody tr.clickable:hover td{background:var(--surface-2)}
   td.tk{font-family:var(--mono);font-weight:600;color:var(--accent-ink);white-space:nowrap}
   td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
   .pos{color:var(--pos)} .neg{color:var(--neg)}
 
+  /* a peer ticker opens its adjustment; frontier tickers are plain text, so the
+     dotted underline is what separates "this does something" from "this is data" */
+  .tklink{font:inherit;font-family:var(--mono);font-weight:600;color:var(--accent-ink);background:none;border:none;padding:0;cursor:pointer;
+    text-decoration:underline;text-decoration-style:dotted;text-decoration-thickness:1px;text-underline-offset:3px}
+  .tklink:hover{color:var(--accent);text-decoration-style:solid}
+  .tklink:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+  #panel-adj tbody tr:hover td{background:var(--surface-2)}
+
   .selrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:2px 0 12px}
-  select{font-family:var(--mono);font-size:14px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--surface);color:var(--ink)}
   .buildup{font-family:var(--mono);font-size:13.5px;color:var(--muted);margin:12px 2px 0;line-height:1.7}
   .buildup b{color:var(--ink)}
   .empty{padding:22px;border:1px dashed var(--hairline);border-radius:12px;background:var(--surface);color:var(--muted)}
   .empty b{color:var(--ink);font-family:var(--mono)}
+  #status:not(:empty){margin-top:26px}
   footer{margin-top:38px;padding-top:16px;border-top:1px solid var(--hairline);color:var(--faint);font-size:12.5px;line-height:1.6}
   .muted{color:var(--muted)}
   .methodrow{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:12px 0 2px}
@@ -98,16 +108,51 @@
   .segbtn.active{background:var(--accent);color:#fff}
   @media (prefers-color-scheme:dark){.segbtn.active{color:#0e141a}}
   .mhint{color:var(--faint);font-size:12px;flex:1 1 260px}
+
+  /* Two estimators of the same firm. The tab carries its own fair multiple, so
+     the tab bar is the comparison — deliberately unlike the boxed Fitting toggle. */
+  .tabs{display:flex;gap:clamp(18px,5vw,40px);margin:26px 0 0;border-bottom:1px solid var(--hairline);overflow-x:auto}
+  .tab{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;text-align:left;cursor:pointer;
+    background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;padding:0 0 11px;color:var(--muted)}
+  .tabname{font-family:var(--serif);font-size:clamp(16px,3.4vw,18px);font-weight:600;letter-spacing:-.01em;color:inherit}
+  .tabmeta{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;color:var(--faint);white-space:nowrap}
+  .tabmeta b{font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .tab:hover{color:var(--ink)}
+  .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+  .tab[aria-selected="true"] .tabmeta b{color:var(--accent)}
+  .tab:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:3px}
+  .panel{margin-top:22px;display:flex;flex-direction:column;gap:20px}
+  .panel[hidden]{display:none}
+  #views[hidden]{display:none}
+
+  dialog{border:1px solid var(--hairline);border-radius:14px;background:var(--surface);color:var(--ink);padding:0;
+    width:min(760px,calc(100vw - 28px));max-width:none;box-shadow:0 20px 54px rgba(6,14,22,.22)}
+  dialog::backdrop{background:var(--scrim)}
+  .dlghead{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;padding:18px 22px;border-bottom:1px solid var(--hairline)}
+  .dlghead .tk{font-size:20px}
+  .dlghead .nm{font-size:16px;flex:1 1 120px}
+  .dlgctx{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;color:var(--faint);flex-basis:100%}
+  .dlgbody{padding:18px 22px 22px;max-height:min(68vh,620px);overflow:auto}
+  .dlgclose{font-family:var(--mono);font-size:16px;line-height:1;padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;
+    background:var(--surface);color:var(--muted);cursor:pointer}
+  .dlgclose:hover{border-color:var(--accent);color:var(--accent)}
+  .dlgbody table{min-width:520px}
+  @media (prefers-reduced-motion:no-preference){
+    dialog[open]{animation:pop .16s ease-out}
+    @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <p class="eyebrow">Comparable-Company Valuation &middot; 2025</p>
-  <h1>Value a firm by adjusted multiples</h1>
+  <h1>Value by multiples</h1>
   <p class="lede">Enter a ticker. The estimator takes the firm's size-and-industry peers, adjusts each peer's
     EV/EBITDA multiple for how it differs from the target on operating characteristics
     (<code>m<sub>j</sub> &times; exp&Sigma;<sub>k</sub>[g<sub>k</sub>(x<sub>i</sub>)&minus;g<sub>k</sub>(x<sub>j</sub>)]</code>),
-    and takes the median of the adjusted peer multiples as the fair multiple. Pick a peer to see its adjustment built up characteristic by characteristic.</p>
+    and takes the median of the adjusted peer multiples as the fair multiple. Click any peer's ticker to see its
+    adjustment built up characteristic by characteristic; the Gradient Boosted tab values the same firm with a
+    flexible machine-learning frontier instead.</p>
 
   <form id="form" autocomplete="off">
     <div class="field">
@@ -133,7 +178,23 @@
     <span class="mhint" id="methodhint"></span>
   </div>
 
-  <div class="out" id="out" aria-live="polite"></div>
+  <div id="status" aria-live="polite"></div>
+  <div id="subject"></div>
+
+  <div id="views" hidden>
+    <div class="tabs" role="tablist" aria-label="Estimator">
+      <button type="button" class="tab" role="tab" id="tab-adj" aria-controls="panel-adj" aria-selected="true" tabindex="0">
+        <span class="tabname">Adjusted Multiples</span>
+        <span class="tabmeta"><b id="num-adj">&mdash;</b> median of peers</span>
+      </button>
+      <button type="button" class="tab" role="tab" id="tab-gb" aria-controls="panel-gb" aria-selected="false" tabindex="-1">
+        <span class="tabname">Gradient Boosted</span>
+        <span class="tabmeta"><b id="num-gb">&mdash;</b> weighted average</span>
+      </button>
+    </div>
+    <div class="panel" id="panel-adj" role="tabpanel" aria-labelledby="tab-adj" tabindex="0"></div>
+    <div class="panel" id="panel-gb" role="tabpanel" aria-labelledby="tab-gb" tabindex="0" hidden></div>
+  </div>
 
   <footer>
     Fair value from the interpretable (rung&nbsp;1) adjusted-multiple estimator: additive appraisal curves
@@ -145,12 +206,25 @@
   </footer>
 </div>
 
+<dialog id="peerdlg" aria-labelledby="dlgtk">
+  <div class="dlghead">
+    <span class="tk" id="dlgtk"></span>
+    <span class="nm" id="dlgname"></span>
+    <button type="button" class="dlgclose" id="dlgclose" aria-label="Close">&times;</button>
+    <span class="dlgctx" id="dlgctx"></span>
+  </div>
+  <div class="dlgbody" id="dlgbody"></div>
+</dialog>
+
 <script>
 const $ = s => document.querySelector(s);
-const out = $("#out");
+const status_ = $("#status"), subject = $("#subject"), views = $("#views");
+const panelAdj = $("#panel-adj"), panelGb = $("#panel-gb"), dlg = $("#peerdlg");
 let PAYLOAD = null;
 let METHOD = "full";
 let CURRENT_TK = "";
+let TAB = "adj";
+let REQ = 0;                     // guards against a slow response overwriting a newer one
 const METHOD_HINT = {
   "5fold": "Out-of-sample: each firm is valued by a model fit on the other 4 folds (matches the paper). The ML frontier gives it no self-weight and excludes its whole fold.",
   "full": "Single fit on all 2025 firms (in-sample): the firm contributes to its own valuation and, for the ML frontier, carries a self-weight.",
@@ -172,6 +246,34 @@ async function loadTickers(){
   }catch(e){}
 }
 
+/* ---- tabs ---------------------------------------------------------------- */
+const TABS = ["adj","gb"];
+function setTab(key){
+  TAB = key;
+  TABS.forEach(k=>{
+    const on = k===key, tab = $("#tab-"+k);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+    tab.tabIndex = on ? 0 : -1;
+    $("#panel-"+k).hidden = !on;
+  });
+}
+function setNum(key, text){ $("#num-"+key).textContent = text; }
+
+TABS.forEach(k=> $("#tab-"+k).addEventListener("click", ()=> setTab(k)));
+$(".tabs").addEventListener("keydown", e=>{
+  const i = TABS.indexOf(TAB);
+  let j = null;
+  if(e.key==="ArrowRight") j = (i+1)%TABS.length;
+  else if(e.key==="ArrowLeft") j = (i-1+TABS.length)%TABS.length;
+  else if(e.key==="Home") j = 0;
+  else if(e.key==="End") j = TABS.length-1;
+  if(j===null) return;
+  e.preventDefault();
+  setTab(TABS[j]);
+  $("#tab-"+TABS[j]).focus();
+});
+
+/* ---- adjusted-multiple panel --------------------------------------------- */
 function verdict(pct){
   if(pct==null) return "";
   const rich = pct>0;
@@ -189,7 +291,8 @@ function verdict(pct){
 function renderPeerTable(p){
   const rows = p.peers.map((pe,i)=>`
     <tr>
-      <td class="tk">${esc(pe.ticker||'—')}</td>
+      <td class="tk"><button type="button" class="tklink" data-peer="${i}"
+        aria-label="Adjustment for ${esc(pe.ticker||pe.name)}">${esc(pe.ticker||'—')}</button></td>
       <td>${esc(pe.name)}</td>
       <td class="muted">${pe.same_industry?'<span class="dot" title="same sub-industry"></span>':''}${esc(pe.subindustry)}</td>
       <td class="r mono">${fmtMult(pe.actual_multiple)}</td>
@@ -225,39 +328,27 @@ function renderBreakdown(pe, target){
       &rarr; adjusted multiple <b>${fmtMult(pe.adjusted_multiple)}</b></div>`;
 }
 
+function openPeer(i){
+  if(!PAYLOAD) return;
+  const pe = PAYLOAD.peers[i], t = PAYLOAD.target;
+  if(!pe) return;
+  $("#dlgtk").textContent = pe.ticker || "—";
+  $("#dlgname").textContent = pe.name || "";
+  $("#dlgctx").textContent = `Its multiple restated on ${t.ticker}'s terms, characteristic by characteristic`;
+  $("#dlgbody").innerHTML = renderBreakdown(pe, t);
+  dlg.showModal();
+}
+panelAdj.addEventListener("click", e=>{
+  const b = e.target.closest(".tklink");
+  if(b) openPeer(+b.dataset.peer);
+});
+$("#dlgclose").addEventListener("click", ()=> dlg.close());
+dlg.addEventListener("click", e=>{ if(e.target===dlg) dlg.close(); });  // click the backdrop
+
 function render(p){
   PAYLOAD = p;
   const t = p.target;
-  const peerBlock = p.n_peers===0
-    ? `<div class="empty">${esc(t.ticker)} has no qualifying peers in 2025 (isolated firm) — no adjusted-multiple valuation.</div>`
-    : `
-      <div class="card">
-        <div class="val">
-          <div class="big"><span class="k">Fair EV/EBITDA</span><span class="num">${fmtMult(p.fair_multiple)}</span>
-            <span class="sub">median of ${p.n_peers} adjusted peer multiples</span></div>
-          <div class="big"><span class="k">Fair enterprise value</span><span class="num">${fmtB(p.ev_fair)}</span>
-            <span class="sub">fair multiple &times; EBITDA (${fmtB(t.ebitda)})</span></div>
-          <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(t.actual_multiple)}</span>
-            <span class="sub">actual EV ${fmtB(t.ev)}</span></div>
-        </div>
-        <div style="margin-top:14px">${verdict(p.pct_vs_fair)}</div>
-      </div>
-
-      <div>
-        <h2 class="sec">Peer set &amp; adjusted multiples <span class="n">${p.n_peers} firms</span></h2>
-        ${renderPeerTable(p)}
-      </div>
-
-      <div class="card">
-        <h2 class="sec" style="margin-top:0">Adjusted multiple, characteristic by characteristic</h2>
-        <div class="selrow">
-          <label class="cap" for="peersel">Peer</label>
-          <select id="peersel"></select>
-        </div>
-        <div id="breakdown"></div>
-      </div>`;
-
-  out.innerHTML = `
+  subject.innerHTML = `
     <div class="card">
       <div class="subj-top">
         <span class="tk">${esc(t.ticker)}</span>
@@ -270,19 +361,35 @@ function render(p){
         <div class="meta"><span class="k">EBITDA</span><span class="v num">${fmtB(t.ebitda)}</span></div>
         <div class="meta"><span class="k">Enterprise value</span><span class="v num">${fmtB(t.ev)}</span></div>
       </div>
-    </div>
-    ${peerBlock}
-    <div id="frontier"></div>`;
+    </div>`;
 
-  if(p.n_peers>0){
-    const sel = $("#peersel");
-    p.peers.forEach((pe,i)=>{ const o=document.createElement("option"); o.value=i;
-      o.textContent = `${pe.ticker} — ${pe.name}`; sel.appendChild(o); });
-    const draw = ()=> { $("#breakdown").innerHTML = renderBreakdown(p.peers[+sel.value], t); };
-    sel.addEventListener("change", draw); draw();
+  if(p.n_peers===0){
+    panelAdj.innerHTML = `<div class="empty">${esc(t.ticker)} has no qualifying peers in 2025 (isolated firm) — no adjusted-multiple valuation.</div>`;
+    setNum("adj","—");
+    return;
   }
+  setNum("adj", fmtMult(p.fair_multiple));
+  panelAdj.innerHTML = `
+    <div class="card">
+      <div class="val">
+        <div class="big"><span class="k">Fair EV/EBITDA</span><span class="num">${fmtMult(p.fair_multiple)}</span>
+          <span class="sub">median of ${p.n_peers} adjusted peer multiples</span></div>
+        <div class="big"><span class="k">Fair enterprise value</span><span class="num">${fmtB(p.ev_fair)}</span>
+          <span class="sub">fair multiple &times; EBITDA (${fmtB(t.ebitda)})</span></div>
+        <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(t.actual_multiple)}</span>
+          <span class="sub">actual EV ${fmtB(t.ev)}</span></div>
+      </div>
+      <div style="margin-top:14px">${verdict(p.pct_vs_fair)}</div>
+    </div>
+
+    <div>
+      <h2 class="sec">Peer set &amp; adjusted multiples <span class="n">${p.n_peers} firms</span>
+        <span class="hint">Click a ticker for its adjustment</span></h2>
+      ${renderPeerTable(p)}
+    </div>`;
 }
 
+/* ---- gradient-boosted panel ---------------------------------------------- */
 const F_TOPN = 25;
 function frontierRows(list){
   return list.map(pe=>`
@@ -294,7 +401,7 @@ function frontierRows(list){
       <td class="r mono ${pe.weight>=0?'pos':'neg'}">${fmtW(pe.weight)}</td>
     </tr>`).join("");
 }
-function renderFrontier(host, f, tk){
+function renderFrontier(f, tk){
   const peers = f.peers || [];
   const table = `<div class="tablewrap"><table>
     <thead><tr><th>Firm</th><th>Company</th><th>Sub-industry</th>
@@ -302,7 +409,7 @@ function renderFrontier(host, f, tk){
     <tbody id="fbody">${frontierRows(peers.slice(0,F_TOPN))}</tbody></table></div>`;
   const more = peers.length>F_TOPN
     ? `<div class="selrow"><button class="chip" id="fshowall">Show all ${peers.length} firms</button></div>` : "";
-  host.innerHTML = `
+  panelGb.innerHTML = `
     <div class="card">
       <h2 class="sec" style="margin-top:0">Machine-learning frontier <span class="n">peer weights</span></h2>
       <p class="lede" style="font-size:13.5px;margin:0 0 14px">
@@ -313,8 +420,8 @@ function renderFrontier(host, f, tk){
              <b>${f.n_nonzero}</b> firms (the other four folds) carry nonzero weight`
           : `Full-sample fit: ${esc(tk)}'s own multiple carries <b>${fmtW(f.self_weight)}</b> of the weight,
              and <b>${f.n_nonzero}</b> firms carry nonzero weight`}
-        — a diffuse web, in contrast to the ~${PAYLOAD?PAYLOAD.n_peers:''} named peers above. Weights sum
-        to 100% and reconstruct the fair value exactly.
+        — a diffuse web, in contrast to the ${PAYLOAD?PAYLOAD.n_peers:''} named peers on the Adjusted Multiples
+        tab. Weights sum to 100% and reconstruct the fair value exactly.
       </p>
       ${table}${more}
     </div>`;
@@ -325,30 +432,58 @@ function renderFrontier(host, f, tk){
     });
   }
 }
-async function loadFrontier(tk){
-  const host = $("#frontier"); if(!host) return;
+async function loadFrontier(tk, req){
   try{
     const r = await fetch("/api/frontier/"+encodeURIComponent(tk)+"?method="+METHOD);
-    if(!r.ok){ host.innerHTML=""; return; }
-    renderFrontier(host, await r.json(), tk);
-  }catch(e){ host.innerHTML=""; }
+    if(req!==REQ) return;
+    if(!r.ok){
+      panelGb.innerHTML = `<div class="empty">No gradient-boosted decomposition for <b>${esc(tk)}</b> in the 2025 sample.</div>`;
+      setNum("gb","—");
+      return;
+    }
+    const f = await r.json();
+    if(req!==REQ) return;
+    setNum("gb", fmtMult(f.fair_multiple));
+    renderFrontier(f, tk);
+  }catch(e){
+    if(req!==REQ) return;
+    panelGb.innerHTML = `<div class="empty">Could not load the gradient-boosted valuation for <b>${esc(tk)}</b>.</div>`;
+    setNum("gb","—");
+  }
 }
 
+/* ---- lookup -------------------------------------------------------------- */
 async function lookup(tk){
   tk=(tk||"").trim().toUpperCase();
   CURRENT_TK = tk;
-  if(!tk){ out.innerHTML=""; return; }
-  out.innerHTML = `<div class="empty">Valuing <b>${esc(tk)}</b>…</div>`;
+  const req = ++REQ;
+  if(dlg.open) dlg.close();
+  if(!tk){ status_.innerHTML=""; subject.innerHTML=""; views.hidden=true; return; }
+  status_.innerHTML = `<div class="empty">Valuing <b>${esc(tk)}</b>…</div>`;
+  subject.innerHTML = ""; views.hidden = true;
+  setNum("adj","…"); setNum("gb","…");
+  panelAdj.innerHTML = ""; panelGb.innerHTML = "";
   try{
     const r = await fetch("/api/valuation/"+encodeURIComponent(tk)+"?method="+METHOD);
-    if(r.status===404){ out.innerHTML = `<div class="empty">No firm with ticker <b>${esc(tk)}</b> in the 2025 sample. Try an example above.</div>`; return; }
-    render(await r.json());
-    loadFrontier(tk);
-  }catch(e){ out.innerHTML = `<div class="empty">Error valuing <b>${esc(tk)}</b>: ${esc(e.message)}</div>`; }
+    if(req!==REQ) return;
+    if(r.status===404){
+      status_.innerHTML = `<div class="empty">No firm with ticker <b>${esc(tk)}</b> in the 2025 sample. Try an example above.</div>`;
+      return;
+    }
+    const p = await r.json();
+    if(req!==REQ) return;
+    status_.innerHTML = "";
+    render(p);
+    views.hidden = false;
+    loadFrontier(tk, req);
+  }catch(e){
+    if(req!==REQ) return;
+    status_.innerHTML = `<div class="empty">Error valuing <b>${esc(tk)}</b>: ${esc(e.message)}</div>`;
+  }
 }
 
 $("#form").addEventListener("submit", e=>{ e.preventDefault(); lookup($("#tk").value); });
-document.querySelectorAll(".chip").forEach(c=> c.addEventListener("click", ()=>{ $("#tk").value=c.dataset.tk; lookup(c.dataset.tk); }));
+document.querySelectorAll(".examples .chip").forEach(c=> c.addEventListener("click", ()=>{ $("#tk").value=c.dataset.tk; lookup(c.dataset.tk); }));
 $("#methodhint").textContent = METHOD_HINT[METHOD];
 document.querySelectorAll("#methodseg .segbtn").forEach(b=> b.addEventListener("click", ()=>{
   if(b.dataset.m===METHOD) return;
