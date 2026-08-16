@@ -93,6 +93,8 @@
   .seg{display:inline-flex;border:1px solid var(--hairline);border-radius:8px;overflow:hidden}
   .segbtn{font-family:var(--sans);font-size:13px;padding:6px 13px;border:none;background:var(--surface);color:var(--muted);cursor:pointer}
   .segbtn+.segbtn{border-left:1px solid var(--hairline)}
+  .segbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .segbtn.active:focus-visible{outline-color:var(--surface)}
   .segbtn.active{background:var(--accent);color:#fff}
   @media (prefers-color-scheme:dark){.segbtn.active{color:#0e141a}}
   .mhint{color:var(--faint);font-size:12px;flex:1 1 260px}
@@ -124,9 +126,9 @@
 
   <div class="methodrow">
     <span class="mlabel">Fitting</span>
-    <div class="seg" id="methodseg">
-      <button type="button" class="segbtn" data-m="5fold">5-fold cross-fit</button>
-      <button type="button" class="segbtn active" data-m="full">Full sample</button>
+    <div class="seg" id="methodseg" role="group" aria-label="Fitting method">
+      <button type="button" class="segbtn active" data-m="full" aria-pressed="true">Full sample</button>
+      <button type="button" class="segbtn" data-m="5fold" aria-pressed="false">5-fold cross-fit</button>
     </div>
     <span class="mhint" id="methodhint"></span>
   </div>
@@ -351,7 +353,11 @@ $("#methodhint").textContent = METHOD_HINT[METHOD];
 document.querySelectorAll("#methodseg .segbtn").forEach(b=> b.addEventListener("click", ()=>{
   if(b.dataset.m===METHOD) return;
   METHOD = b.dataset.m;
-  document.querySelectorAll("#methodseg .segbtn").forEach(x=> x.classList.toggle("active", x.dataset.m===METHOD));
+  document.querySelectorAll("#methodseg .segbtn").forEach(x=>{
+    const on = x.dataset.m===METHOD;
+    x.classList.toggle("active", on);
+    x.setAttribute("aria-pressed", on ? "true" : "false");
+  });
   $("#methodhint").textContent = METHOD_HINT[METHOD];
   if(CURRENT_TK) lookup(CURRENT_TK);
 }));
