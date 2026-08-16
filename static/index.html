@@ -123,6 +123,9 @@
     background:var(--surface);border:1px solid var(--hairline);border-radius:11px;padding:5px;
     box-shadow:0 14px 34px rgba(6,14,22,.16)}
   .menu[hidden]{display:none}
+  /* transparent bridge across the visual gap, so the pointer never leaves the
+     menu's hit area on the way down from the button */
+  .menu::before{content:"";position:absolute;left:0;right:0;top:-12px;height:12px}
   .menuitem{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;cursor:pointer;
     background:none;border:none;border-radius:8px;padding:9px 11px 10px;color:var(--ink);font:inherit}
   .menuitem:hover,.menuitem:focus-visible{background:var(--surface-2);outline:none}
@@ -585,12 +588,18 @@ function chooseMethod(m){
 
 // hover opens it only where hovering is a real thing; click/keyboard always work
 if(window.matchMedia && matchMedia("(hover:hover)").matches){
-  gowrap.addEventListener("mouseenter", ()=>{
+  // Re-entering must cancel a pending close, or the timer started on the way
+  // out still fires once the pointer is already sitting on the menu.
+  const holdMenu = ()=>{
+    clearTimeout(menuTimer);
     if(!menuIsOpen()){ menuOpen(true); openedByHover = true; }
-  });
+  };
+  gowrap.addEventListener("mouseenter", holdMenu);
+  gomenu.addEventListener("mouseenter", ()=> clearTimeout(menuTimer));
+  gomenu.addEventListener("mousemove", ()=> clearTimeout(menuTimer));
   gowrap.addEventListener("mouseleave", ()=>{
     clearTimeout(menuTimer);
-    menuTimer = setTimeout(()=> menuOpen(false), 180);   // survives a diagonal mouse path
+    menuTimer = setTimeout(()=> menuOpen(false), 500);   // time to travel to the menu
   });
 }
 gobtn.addEventListener("click", ()=>{
