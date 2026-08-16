@@ -14,12 +14,27 @@ Industry is handled by matching (peers are same-industry), so the 21 additive cu
 the adjustment. Re-run this after the pipeline refreshes the panel / curves.
 """
 import json
+import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path("/Users/kerryback/repos/multiples/workspace")
-OUT = ROOT / "valuation_app" / "data"
+# Paths. The three inputs moved twice since this script was written: the repo was
+# restructured into per-author trees on 2026-08-04 (workspace -> workspaces/<author>),
+# the panels were promoted to the shared canonical folder, and the peer rule changed
+# to Rule C on 2026-08-16. MULTIPLES_DATA locates the canonical panels; everything
+# else is derived from the repo, so nothing here is a bare absolute path.
+MULT = Path("/Users/kerryback/repos/multiples")
+GLOBAL_DATA = Path(os.environ["MULTIPLES_DATA"]).parent / "global"
+
+# Rule C rebuild of the two peer-dependent inputs (peer sets and appraisal curves).
+# Both come from the same clean-room run; taking one from here and the other from
+# the old Rule A tree would mix rules inside a single displayed valuation.
+RULEC = MULT / "workspaces/kerry-back/analyst/peer_rule_c/results/site"
+ARTIFACT = RULEC / "artifact_data_2025.json"
+STORE = RULEC / "gk_store"
+
+OUT = Path(__file__).resolve().parent / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # 21 additive characteristics in the model g, with display labels (order = presentation order)
@@ -51,14 +66,14 @@ FEAT_KEYS = [k for k, _ in FEATURES]
 
 def main():
     # --- identity + peers (names, tickers, sub-industry, peer gvkeys) ---
-    art = json.loads((ROOT / "logmult" / "artifact_data_2025.json").read_text())
+    art = json.loads(ARTIFACT.read_text())
     idmap = {f["gvkey"]: f for f in art["firms"]}
 
     # --- corrected-panel characteristics for the 2025 positive-EBITDA cross-section ---
     frames = []
-    for samp, path in [("nonmicro", "extend2000/data/panel_nonmicro.parquet"),
-                       ("micro", "extend2000/data/panel_micro.parquet")]:
-        p = pd.read_parquet(ROOT / path)
+    for samp, path in [("nonmicro", "panel_nonmicro.parquet"),
+                       ("micro", "panel_micro.parquet")]:
+        p = pd.read_parquet(GLOBAL_DATA / path)
         p = p[(p["valyear"] == 2025) & (p["ebitda_yield"].astype(float) > 0)].copy()
         p["gvkey"] = p["gvkey"].astype(str)
         p["sample"] = samp
@@ -68,8 +83,6 @@ def main():
     # --- g_k curves for 2025 from the canonical store (single source of truth), PER SAMPLE:
     #     the paper estimates non-micro and micro separately, so each sample has its own
     #     full-sample (1-fold) fit, its own 5 cross-fit folds, and its own fold membership ---
-    STORE = ROOT / "logmult" / "results" / "gk_store"
-
     def curves_dict(df):
         out = {}
         for feat, sub in df.groupby("feature"):

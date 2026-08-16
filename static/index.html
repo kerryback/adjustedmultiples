@@ -125,8 +125,8 @@
   <div class="methodrow">
     <span class="mlabel">Fitting</span>
     <div class="seg" id="methodseg">
-      <button type="button" class="segbtn active" data-m="5fold">5-fold cross-fit</button>
-      <button type="button" class="segbtn" data-m="full">Full sample</button>
+      <button type="button" class="segbtn" data-m="5fold">5-fold cross-fit</button>
+      <button type="button" class="segbtn active" data-m="full">Full sample</button>
     </div>
     <span class="mhint" id="methodhint"></span>
   </div>
@@ -147,7 +147,7 @@
 const $ = s => document.querySelector(s);
 const out = $("#out");
 let PAYLOAD = null;
-let METHOD = "5fold";
+let METHOD = "full";
 let CURRENT_TK = "";
 const METHOD_HINT = {
   "5fold": "Out-of-sample: each firm is valued by a model fit on the other 4 folds (matches the paper). The ML frontier gives it no self-weight and excludes its whole fold.",

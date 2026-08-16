@@ -107,11 +107,11 @@ def tickers():
 
 
 def _method(m: str) -> str:
-    return m if m in ("full", "5fold") else "5fold"
+    return m if m in ("full", "5fold") else "full"
 
 
 @app.get("/api/valuation/{ticker}")
-def valuation(ticker: str, method: str = "5fold"):
+def valuation(ticker: str, method: str = "full"):
     method = _method(method)
     t = BY_TICKER.get(ticker.strip().upper())
     if t is None:
@@ -138,7 +138,7 @@ def valuation(ticker: str, method: str = "5fold"):
 
 
 @app.get("/api/frontier/{ticker}")
-def frontier(ticker: str, method: str = "5fold"):
+def frontier(ticker: str, method: str = "full"):
     method = _method(method)
     key = ticker.strip().upper()
     ti = BY_TICKER.get(key)
