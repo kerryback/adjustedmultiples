@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Valuation by Multiples</title>
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<script defer src="/static/vendor/katex/katex.min.js"></script>
+<script defer src="/static/vendor/katex/contrib/auto-render.min.js"></script>
+<script>
+  // Hide the TeX source until KaTeX has rendered it, so no one sees raw \[...\]
+  // mid-load. The timer guarantees the content appears even if the scripts fail
+  // to load — worst case is unrendered TeX, never a blank spot.
+  document.documentElement.classList.add("mathpending");
+  const revealMath = () => document.documentElement.classList.remove("mathpending");
+  setTimeout(revealMath, 1500);
+</script>
 <style>
   :root{
     --ground:#f6f8fa; --surface:#fff; --surface-2:#eef2f6; --ink:#15202b; --muted:#5c6b7a; --faint:#8090a0;
@@ -98,16 +109,30 @@
   #status:not(:empty){margin-top:26px}
   footer{margin-top:38px;padding-top:16px;border-top:1px solid var(--hairline);color:var(--faint);font-size:12.5px;line-height:1.6}
   .muted{color:var(--muted)}
-  .methodrow{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:12px 0 2px}
-  .mlabel{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-  .seg{display:inline-flex;border:1px solid var(--hairline);border-radius:8px;overflow:hidden}
-  .segbtn{font-family:var(--sans);font-size:13px;padding:6px 13px;border:none;background:var(--surface);color:var(--muted);cursor:pointer}
-  .segbtn+.segbtn{border-left:1px solid var(--hairline)}
-  .segbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-  .segbtn.active:focus-visible{outline-color:var(--surface)}
-  .segbtn.active{background:var(--accent);color:#fff}
-  @media (prefers-color-scheme:dark){.segbtn.active{color:#0e141a}}
-  .mhint{color:var(--faint);font-size:12px;flex:1 1 260px}
+  /* the fit is a property of the action, so it lives in the action's own menu
+     rather than as a second control competing for attention */
+  /* the menu is positioned against the form, not the button: the button moves to
+     the left edge when the form wraps, and either edge anchor alone falls off
+     one side or the other. The form spans the content width at every size. */
+  form{position:relative}
+  .gowrap{position:static}
+  .caret{font-size:11px;opacity:.85;margin-left:2px}
+  /* anchored to the button's right edge: the button sits at the end of the form,
+     so a left-anchored menu would hang off the side of the viewport */
+  .menu{position:absolute;z-index:30;top:calc(100% + 6px);right:0;width:min(360px,calc(100vw - 32px));
+    background:var(--surface);border:1px solid var(--hairline);border-radius:11px;padding:5px;
+    box-shadow:0 14px 34px rgba(6,14,22,.16)}
+  .menu[hidden]{display:none}
+  .menuitem{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;cursor:pointer;
+    background:none;border:none;border-radius:8px;padding:9px 11px 10px;color:var(--ink);font:inherit}
+  .menuitem:hover,.menuitem:focus-visible{background:var(--surface-2);outline:none}
+  .menuitem:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+  .mi-t{font-size:14px;font-weight:600;display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+  /* the check marks which fit produced the numbers on screen */
+  .menuitem[aria-checked="true"] .mi-t::before{content:"\2713";color:var(--accent);font-weight:700}
+  .menuitem[aria-checked="false"] .mi-t::before{content:"\2713";visibility:hidden;font-weight:700}
+  .mi-rec{font-family:var(--mono);font-size:11px;letter-spacing:.03em;color:var(--accent);font-weight:600}
+  .mi-d{font-size:12.5px;color:var(--muted);line-height:1.45;padding-left:19px}
 
   /* Two estimators of the same firm. The tab carries its own fair multiple, so
      the tab bar is the comparison — deliberately unlike the boxed Fitting toggle. */
@@ -124,6 +149,21 @@
   .panel{margin-top:22px;display:flex;flex-direction:column;gap:20px}
   .panel[hidden]{display:none}
   #views[hidden]{display:none}
+
+  /* a long display equation scrolls in its own box; the page body never does */
+  .katex-display{overflow-x:auto;overflow-y:hidden;max-width:100%;margin:0;padding:2px 0}
+  /* visibility (not display) so the equation's space is reserved and the page
+     does not jump when the math swaps in */
+  .mathpending .eq,.mathpending .m{visibility:hidden}
+  .eq{margin:14px 0;color:var(--ink)}
+  .eq.lede-eq{margin:16px 0 14px;max-width:66ch}
+  .buildup .eq{margin:6px 0 0}
+  /* math inherits its context's size, which is far too small in a 10.5px table
+     header (and smaller again inside a subscript) — scale it back up */
+  /* KaTeX emits real characters, so the header's uppercasing and letter-spacing
+     would rewrite g_k as G_K — neutralise both inside math */
+  thead th .katex{font-size:1.25em;color:var(--muted);text-transform:none;letter-spacing:normal}
+  .buildup .katex{color:var(--ink)}
 
   dialog{border:1px solid var(--hairline);border-radius:14px;background:var(--surface);color:var(--ink);padding:0;
     width:min(760px,calc(100vw - 28px));max-width:none;box-shadow:0 20px 54px rgba(6,14,22,.22)}
@@ -147,19 +187,36 @@
 <div class="wrap">
   <p class="eyebrow">Comparable-Company Valuation &middot; 2025</p>
   <h1>Value by multiples</h1>
-  <p class="lede">Enter a ticker. The estimator takes the firm's size-and-industry peers, adjusts each peer's
-    EV/EBITDA multiple for how it differs from the target on operating characteristics
-    (<code>m<sub>j</sub> &times; exp&Sigma;<sub>k</sub>[g<sub>k</sub>(x<sub>i</sub>)&minus;g<sub>k</sub>(x<sub>j</sub>)]</code>),
-    and takes the median of the adjusted peer multiples as the fair multiple. Click any peer's ticker to see its
-    adjustment built up characteristic by characteristic; the Gradient Boosted tab values the same firm with a
-    flexible machine-learning frontier instead.</p>
+  <p class="lede">Enter a ticker. The estimator takes the firm's size-and-industry peers, restates each peer's
+    EV/EBITDA multiple on the target's terms &mdash; adjusting for how the two differ on operating
+    characteristics &mdash; and takes the median:</p>
+  <div class="eq lede-eq">
+    \[\tilde m_i \;=\; \underset{j\,\in\,\text{peers}}{\operatorname{median}}\;
+      m_j \exp\!\left(\sum_k \left[g_k(x_i) - g_k(x_j)\right]\right)\]
+  </div>
+  <p class="lede">Click any peer's ticker to see its adjustment built up characteristic by characteristic;
+    the Gradient Boosted tab values the same firm with a flexible machine-learning frontier instead.</p>
 
   <form id="form" autocomplete="off">
     <div class="field">
       <label class="cap" for="tk">Ticker</label>
       <input type="text" id="tk" name="tk" placeholder="AAPL" list="tickers" spellcheck="false" autocapitalize="characters">
     </div>
-    <button class="go" type="submit">Value firm</button>
+    <div class="gowrap" id="gowrap">
+      <button class="go" type="button" id="gobtn" aria-haspopup="menu" aria-expanded="false" aria-controls="gomenu">
+        Value firm <span class="caret" aria-hidden="true">&#9662;</span>
+      </button>
+      <div class="menu" id="gomenu" role="menu" aria-label="Fit the appraisal curves" hidden>
+        <button type="button" class="menuitem" role="menuitemradio" data-m="full" aria-checked="true">
+          <span class="mi-t">Full sample fit <span class="mi-rec">(recommended)</span></span>
+          <span class="mi-d">One fit on all 2025 firms; the firm contributes to its own valuation</span>
+        </button>
+        <button type="button" class="menuitem" role="menuitemradio" data-m="5fold" aria-checked="false">
+          <span class="mi-t">5-fold cross fit</span>
+          <span class="mi-d">Each firm valued out-of-sample by a model fit on the other folds; matches the paper</span>
+        </button>
+      </div>
+    </div>
     <datalist id="tickers"></datalist>
   </form>
   <p class="examples"><span>Try</span>
@@ -168,15 +225,6 @@
     <button class="chip" type="button" data-tk="NKE">NKE</button>
     <button class="chip" type="button" data-tk="AAPL">AAPL</button>
   </p>
-
-  <div class="methodrow">
-    <span class="mlabel">Fitting</span>
-    <div class="seg" id="methodseg" role="group" aria-label="Fitting method">
-      <button type="button" class="segbtn active" data-m="full" aria-pressed="true">Full sample</button>
-      <button type="button" class="segbtn" data-m="5fold" aria-pressed="false">5-fold cross-fit</button>
-    </div>
-    <span class="mhint" id="methodhint"></span>
-  </div>
 
   <div id="status" aria-live="polite"></div>
   <div id="subject"></div>
@@ -198,8 +246,9 @@
 
   <footer>
     Fair value from the interpretable (rung&nbsp;1) adjusted-multiple estimator: additive appraisal curves
-    <code>g<sub>k</sub></code> fit on the 2025 positive-EBITDA U.S.&nbsp;cross-section &mdash; a single full-sample
-    fit, or 5-fold cross-fit where each firm is valued out-of-sample (the toggle above; the latter matches the paper).
+    <span class="m">\(g_k\)</span> fit on the 2025 positive-EBITDA U.S.&nbsp;cross-section &mdash; a single full-sample
+    fit, or 5-fold cross-fit where each firm is valued out-of-sample (pick either from the Value firm menu;
+    the latter matches the paper).
     Peers are the leave-one-out group of same-industry firms within a factor of two of the target's market cap.
     Industry is handled by matching (a <span class="dot"></span> marks a same-sub-industry peer), so the additive
     curves carry the adjustment. Illustrative; not investment advice.
@@ -225,10 +274,8 @@ let METHOD = "full";
 let CURRENT_TK = "";
 let TAB = "adj";
 let REQ = 0;                     // guards against a slow response overwriting a newer one
-const METHOD_HINT = {
-  "5fold": "Out-of-sample: each firm is valued by a model fit on the other 4 folds (matches the paper). The ML frontier gives it no self-weight and excludes its whole fold.",
-  "full": "Single fit on all 2025 firms (in-sample): the firm contributes to its own valuation and, for the ML frontier, carries a self-weight.",
-};
+// the long-form explanation of each fit now lives in the menu itself
+const METHOD_LABEL = {"full":"Full sample", "5fold":"5-fold cross fit"};
 
 const fmtMult = v => v==null ? "—" : v.toFixed(v>=100?0:v>=10?1:2)+"×";
 const fmtB = v => v==null ? "—" : "$"+(v>=100?v.toFixed(0):v>=10?v.toFixed(1):v.toFixed(2))+"bn";
@@ -237,6 +284,25 @@ const fmtSigned = (v,d=3) => v==null||!isFinite(v) ? "—" : (v>=0?"+":"")+v.toF
 const fmtPct = v => v==null ? "—" : (v>=0?"+":"")+(v*100).toFixed(1)+"%";
 const fmtW = v => v==null ? "—" : (v>=0?"+":"")+(v*100).toFixed(2)+"%";
 const esc = s => { const d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; };
+// tickers land inside \text{...}; keep only characters that are safe as TeX source
+const tex = s => String(s==null?"":s).replace(/[^A-Za-z0-9.\-]/g,"");
+const KATEX_OPTS = {
+  delimiters:[{left:"\\[",right:"\\]",display:true},{left:"\\(",right:"\\)",display:false}],
+  throwOnError:false,
+};
+// KaTeX renders synchronously, but its scripts are deferred — this inline script
+// runs first, so a call made before they execute has to wait for DOMContentLoaded.
+function typeset(el){
+  if(!el) return;
+  if(window.renderMathInElement){ renderMathInElement(el, KATEX_OPTS); return; }
+  document.addEventListener("DOMContentLoaded", ()=>{
+    if(window.renderMathInElement) renderMathInElement(el, KATEX_OPTS);
+  }, {once:true});
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  if(window.renderMathInElement) renderMathInElement(document.body, KATEX_OPTS);
+  revealMath();
+});
 
 async function loadTickers(){
   try{
@@ -319,13 +385,16 @@ function renderBreakdown(pe, target){
   return `<div class="tablewrap"><table>
     <thead><tr><th>Characteristic</th>
       <th class="r">${esc(target.ticker)}</th><th class="r">${esc(pe.ticker)}</th>
-      <th class="r">g<sub>k</sub>(${esc(target.ticker)})</th><th class="r">g<sub>k</sub>(${esc(pe.ticker)})</th>
-      <th class="r">&Delta;g<sub>k</sub></th></tr></thead>
+      <th class="r">\\(g_k(\\text{${tex(target.ticker)}})\\)</th>
+      <th class="r">\\(g_k(\\text{${tex(pe.ticker)}})\\)</th>
+      <th class="r">\\(\\Delta g_k\\)</th></tr></thead>
     <tbody>${rows}</tbody></table></div>
-    <div class="buildup">${esc(pe.ticker)}'s multiple <b>${fmtMult(pe.actual_multiple)}</b>
-      &times; exp(&Sigma;&Delta;g<sub>k</sub> = <b>${fmtSigned(pe.log_adjustment,3)}</b>)
-      = &times;${pe.adjustment_factor.toFixed(3)}
-      &rarr; adjusted multiple <b>${fmtMult(pe.adjusted_multiple)}</b></div>`;
+    <div class="buildup">${esc(pe.ticker)}'s own multiple, carried onto ${esc(target.ticker)}'s terms:
+      <div class="eq">\\[${fmtNum(pe.actual_multiple,2)} \\times
+        \\exp\\!\\left(\\sum_k \\Delta g_k\\right)
+        = ${fmtNum(pe.actual_multiple,2)} \\times \\exp(${fmtSigned(pe.log_adjustment,3)})
+        = ${fmtNum(pe.actual_multiple,2)} \\times ${pe.adjustment_factor.toFixed(3)}
+        = ${fmtNum(pe.adjusted_multiple,2)}\\]</div></div>`;
 }
 
 function openPeer(i){
@@ -336,6 +405,7 @@ function openPeer(i){
   $("#dlgname").textContent = pe.name || "";
   $("#dlgctx").textContent = `Its multiple restated on ${t.ticker}'s terms, characteristic by characteristic`;
   $("#dlgbody").innerHTML = renderBreakdown(pe, t);
+  typeset($("#dlgbody"));
   dlg.showModal();
 }
 panelAdj.addEventListener("click", e=>{
@@ -360,6 +430,7 @@ function render(p){
         <div class="meta"><span class="k">Market cap</span><span class="v num">${fmtB(t.mktcap_b)}</span></div>
         <div class="meta"><span class="k">EBITDA</span><span class="v num">${fmtB(t.ebitda)}</span></div>
         <div class="meta"><span class="k">Enterprise value</span><span class="v num">${fmtB(t.ev)}</span></div>
+        <div class="meta"><span class="k">Fitting</span><span class="v">${esc(METHOD_LABEL[p.method]||"")}</span></div>
       </div>
     </div>`;
 
@@ -421,10 +492,13 @@ function renderFrontier(f, tk){
           : `Full-sample fit: ${esc(tk)}'s own multiple carries <b>${fmtW(f.self_weight)}</b> of the weight,
              and <b>${f.n_nonzero}</b> firms carry nonzero weight`}
         — a diffuse web, in contrast to the ${PAYLOAD?PAYLOAD.n_peers:''} named peers on the Adjusted Multiples
-        tab. Weights sum to 100% and reconstruct the fair value exactly.
+        tab. The weights sum to one and reconstruct the fair value exactly:
       </p>
+      <div class="eq">\\[\\hat m_i \\;=\\; \\sum_j w_{ij}\\, m_j,
+        \\qquad \\sum_j w_{ij} = 1\\]</div>
       ${table}${more}
     </div>`;
+  typeset(panelGb);
   if(peers.length>F_TOPN){
     $("#fshowall").addEventListener("click", ()=>{
       $("#fbody").innerHTML = frontierRows(peers);
@@ -484,18 +558,66 @@ async function lookup(tk){
 
 $("#form").addEventListener("submit", e=>{ e.preventDefault(); lookup($("#tk").value); });
 document.querySelectorAll(".examples .chip").forEach(c=> c.addEventListener("click", ()=>{ $("#tk").value=c.dataset.tk; lookup(c.dataset.tk); }));
-$("#methodhint").textContent = METHOD_HINT[METHOD];
-document.querySelectorAll("#methodseg .segbtn").forEach(b=> b.addEventListener("click", ()=>{
-  if(b.dataset.m===METHOD) return;
-  METHOD = b.dataset.m;
-  document.querySelectorAll("#methodseg .segbtn").forEach(x=>{
-    const on = x.dataset.m===METHOD;
-    x.classList.toggle("active", on);
-    x.setAttribute("aria-pressed", on ? "true" : "false");
+/* ---- fit menu on the Value firm button ----------------------------------- */
+const gowrap = $("#gowrap"), gobtn = $("#gobtn"), gomenu = $("#gomenu");
+const menuItems = () => [...gomenu.querySelectorAll(".menuitem")];
+const menuIsOpen = () => !gomenu.hidden;
+let menuTimer = null;
+
+let openedByHover = false;
+function menuOpen(open){
+  clearTimeout(menuTimer);
+  gomenu.hidden = !open;
+  gobtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if(!open) openedByHover = false;
+}
+function syncMenu(){
+  menuItems().forEach(i=> i.setAttribute("aria-checked", i.dataset.m===METHOD ? "true" : "false"));
+}
+// choosing a fit IS the submit action: it values whatever ticker is in the box
+function chooseMethod(m){
+  METHOD = m;
+  syncMenu();
+  menuOpen(false);
+  gobtn.focus();
+  lookup($("#tk").value);
+}
+
+// hover opens it only where hovering is a real thing; click/keyboard always work
+if(window.matchMedia && matchMedia("(hover:hover)").matches){
+  gowrap.addEventListener("mouseenter", ()=>{
+    if(!menuIsOpen()){ menuOpen(true); openedByHover = true; }
   });
-  $("#methodhint").textContent = METHOD_HINT[METHOD];
-  if(CURRENT_TK) lookup(CURRENT_TK);
-}));
+  gowrap.addEventListener("mouseleave", ()=>{
+    clearTimeout(menuTimer);
+    menuTimer = setTimeout(()=> menuOpen(false), 180);   // survives a diagonal mouse path
+  });
+}
+gobtn.addEventListener("click", ()=>{
+  // clicking a menu hover already opened must not close it — that reads as the
+  // menu flashing shut under the pointer. Only a click-opened menu toggles.
+  if(menuIsOpen() && !openedByHover){ menuOpen(false); return; }
+  openedByHover = false;
+  menuOpen(true);
+  menuItems()[0].focus();
+});
+gobtn.addEventListener("keydown", e=>{
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault(); menuOpen(true); menuItems()[e.key==="ArrowDown"?0:1].focus(); }
+});
+gomenu.addEventListener("click", e=>{
+  const it = e.target.closest(".menuitem");
+  if(it) chooseMethod(it.dataset.m);
+});
+gomenu.addEventListener("keydown", e=>{
+  const items = menuItems(), i = items.indexOf(document.activeElement);
+  if(e.key==="ArrowDown"){ e.preventDefault(); items[(i+1)%items.length].focus(); }
+  else if(e.key==="ArrowUp"){ e.preventDefault(); items[(i-1+items.length)%items.length].focus(); }
+  else if(e.key==="Escape"){ e.preventDefault(); menuOpen(false); gobtn.focus(); }
+  else if(e.key==="Tab"){ menuOpen(false); }
+});
+document.addEventListener("click", e=>{ if(menuIsOpen() && !gowrap.contains(e.target)) menuOpen(false); });
+syncMenu();
+
 loadTickers().then(()=>{ $("#tk").value="DPZ"; lookup("DPZ"); });
 </script>
 </body>
