@@ -142,11 +142,10 @@
   /* filled folder tabs: the live one in the accent, the other the same hue
      muted, so the pair reads as tabs rather than as two headings */
   .tabs{display:flex;gap:5px;margin:26px 0 0;border-bottom:1px solid var(--hairline);overflow-x:auto}
-  .tab{flex:0 0 auto;display:flex;flex-direction:column;gap:1px;text-align:left;cursor:pointer;
+  .tab{flex:0 0 auto;text-align:left;cursor:pointer;
     background:var(--accent-soft);color:var(--accent-ink);border:none;border-radius:11px 11px 0 0;
-    margin-bottom:-1px;padding:9px 18px 10px}
+    margin-bottom:-1px;padding:11px 20px 12px}
   .tabname{font-family:var(--serif);font-size:clamp(15px,3.2vw,17px);font-weight:600;letter-spacing:-.01em;color:inherit}
-  .tabmeta{font-family:var(--mono);font-size:11px;letter-spacing:.03em;color:inherit;opacity:.75;white-space:nowrap}
   .tab:not([aria-selected="true"]):hover{background:color-mix(in srgb,var(--accent) 20%,var(--accent-soft))}
   .tab[aria-selected="true"]{background:var(--accent);color:#fff}
   @media (prefers-color-scheme:dark){.tab[aria-selected="true"]{color:#0e141a}}
@@ -238,11 +237,9 @@
     <div class="tabs" role="tablist" aria-label="Estimator">
       <button type="button" class="tab" role="tab" id="tab-adj" aria-controls="panel-adj" aria-selected="true" tabindex="0">
         <span class="tabname">Adjusted Multiples</span>
-        <span class="tabmeta">median of peers</span>
       </button>
       <button type="button" class="tab" role="tab" id="tab-gb" aria-controls="panel-gb" aria-selected="false" tabindex="-1">
         <span class="tabname">Gradient Boosted</span>
-        <span class="tabmeta">weighted average</span>
       </button>
     </div>
     <div class="panel" id="panel-adj" role="tabpanel" aria-labelledby="tab-adj" tabindex="0"></div>
@@ -344,14 +341,16 @@ $(".tabs").addEventListener("keydown", e=>{
 });
 
 /* ---- adjusted-multiple panel --------------------------------------------- */
-function verdict(pct){
+// `basis` names which estimator's fair value the market is being compared with,
+// since both tabs draw this same verdict from their own number
+function verdict(pct, basis){
   if(pct==null) return "";
   const rich = pct>0;
   const mag = Math.min(Math.abs(pct),1); // cap gauge at ±100%
   const w = (mag*50).toFixed(1);
   const label = rich
-    ? `Market prices it <b>${fmtPct(pct)}</b> above adjusted-multiple fair value (relatively rich)`
-    : `Market prices it <b>${fmtPct(pct)}</b> vs fair value (relatively cheap)`;
+    ? `Market prices it <b>${fmtPct(pct)}</b> above ${basis} fair value (relatively rich)`
+    : `Market prices it <b>${fmtPct(pct)}</b> vs ${basis} fair value (relatively cheap)`;
   return `<div class="verdict ${rich?'rich':'cheap'}">${label}</div>
     <div class="gauge"><div class="mid"></div>
       ${rich?`<div class="fillp" style="width:${w}%"></div>`:`<div class="filln" style="width:${w}%"></div>`}
@@ -452,7 +451,7 @@ function render(p){
         <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(t.actual_multiple)}</span>
           <span class="sub">actual EV ${fmtB(t.ev)}</span></div>
       </div>
-      <div style="margin-top:14px">${verdict(p.pct_vs_fair)}</div>
+      <div style="margin-top:14px">${verdict(p.pct_vs_fair,"adjusted-multiple")}</div>
     </div>
 
     <div>
@@ -482,12 +481,29 @@ function renderFrontier(f, tk){
     <tbody id="fbody">${frontierRows(peers.slice(0,F_TOPN))}</tbody></table></div>`;
   const more = peers.length>F_TOPN
     ? `<div class="selrow"><button class="chip" id="fshowall">Show all ${peers.length} firms</button></div>` : "";
+  // headline numbers laid out exactly as the Adjusted Multiples tab lays out its
+  // own, so the two estimators can be read against each other tab to tab
+  const t = (PAYLOAD && PAYLOAD.target && PAYLOAD.target.ticker===tk) ? PAYLOAD.target : null;
+  const evFair = (t && f.fair_multiple!=null) ? f.fair_multiple * t.ebitda : null;
+  const pct = (t && evFair) ? (t.ev/evFair - 1) : null;
   panelGb.innerHTML = `
     <div class="card">
-      <h2 class="sec" style="margin-top:0">Machine-learning frontier <span class="n">peer weights</span></h2>
-      <p class="lede" style="font-size:13.5px;margin:0 0 14px">
-        The flexible ML frontier (a gradient-boosted model, squared-error loss) values ${esc(tk)} as a
-        weighted average of 2025 firms' multiples: fair EV/EBITDA <b>${fmtMult(f.fair_multiple)}</b>.
+      <div class="val">
+        <div class="big"><span class="k">Fair EV/EBITDA</span><span class="num">${fmtMult(f.fair_multiple)}</span>
+          <span class="sub">weighted average of ${f.n_nonzero} firms' multiples</span></div>
+        <div class="big"><span class="k">Fair enterprise value</span><span class="num">${fmtB(evFair)}</span>
+          <span class="sub">fair multiple &times; EBITDA (${fmtB(t?t.ebitda:null)})</span></div>
+        <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(t?t.actual_multiple:f.actual_multiple)}</span>
+          <span class="sub">actual EV ${fmtB(t?t.ev:null)}</span></div>
+      </div>
+      <div style="margin-top:14px">${verdict(pct,"gradient-boosted")}</div>
+    </div>
+
+    <div>
+      <h2 class="sec">Frontier weights <span class="n">${f.n_nonzero} firms</span></h2>
+      <p class="lede" style="font-size:13.5px;margin:0 0 12px">
+        A gradient-boosted model (squared-error loss) values ${esc(tk)} as a weighted average of 2025 firms'
+        multiples.
         ${f.method==="5fold"
           ? `Out-of-sample (5-fold cross-fit): ${esc(tk)} and its fold-mates carry <b>no</b> weight, and
              <b>${f.n_nonzero}</b> firms (the other four folds) carry nonzero weight`
