@@ -209,7 +209,10 @@ def frontier(ticker: str, method: str = "full"):
     tick, mult, fair = F_TICK[s], F_MULT[s], F_FAIR[s]
     w = F_S[s][method][i]
     peers = []
-    for j in np.argsort(-np.abs(w)):
+    # SIGNED, descending: the firms the model leans on positively first, the
+    # ones it leans against at the bottom. Sorting on |w| interleaves the two
+    # and hides that a handful of weights are negative at all.
+    for j in np.argsort(-w):
         j = int(j)
         if j == i or abs(float(w[j])) < F_EPS:
             continue
