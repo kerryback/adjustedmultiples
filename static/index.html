@@ -91,6 +91,10 @@
   td.tk{font-family:var(--mono);font-weight:600;color:var(--accent-ink);white-space:nowrap}
   td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:middle}
+  /* a peer the widened Rule D pool reached in the other size universe */
+  .xu{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:9px;
+      border:1px solid var(--hairline);color:var(--faint);font-size:10px;
+      letter-spacing:.05em;text-transform:uppercase;vertical-align:middle}
   .pos{color:var(--pos)} .neg{color:var(--neg)}
 
   /* a peer ticker opens its adjustment; frontier tickers are plain text, so the
@@ -199,7 +203,7 @@
       m_j \exp\!\left(\sum_k \left[g_k(x_i) - g_k(x_j)\right]\right)\]
   </div>
   <p class="lede">Click any peer's ticker to see its adjustment built up characteristic by characteristic;
-    the Gradient Boosted tab values the same firm with a flexible machine-learning frontier instead.</p>
+    the Gradient Boosted tab values the same firm with a non-additive machine-learning frontier instead.</p>
 
   <form id="form" autocomplete="off">
     <div class="field">
@@ -251,9 +255,11 @@
     <span class="m">\(g_k\)</span> fit on the 2025 positive-EBITDA U.S.&nbsp;cross-section &mdash; a single full-sample
     fit, or 5-fold cross-fit where each firm is valued out-of-sample (pick either from the Value firm menu;
     the latter matches the paper).
-    Peers are the leave-one-out group of same-industry firms within a factor of two of the target's market cap.
-    Industry is handled by matching (a <span class="dot"></span> marks a same-sub-industry peer), so the additive
-    curves carry the adjustment. Illustrative; not investment advice.
+    Peers are the five to ten closest firms the matching ladder reaches: same GICS sector, widening from
+    sub-industry outward and from a factor of two on market cap out to five until it has five. Candidates come
+    from the whole 2025 cross-section, so a peer may sit in the other size universe (marked
+    <span class="xu">cross</span>); a <span class="dot"></span> marks a same-sub-industry peer. Illustrative;
+    not investment advice.
   </footer>
 </div>
 
@@ -363,7 +369,7 @@ function renderPeerTable(p){
       <td class="tk"><button type="button" class="tklink" data-peer="${i}"
         aria-label="Adjustment for ${esc(pe.ticker||pe.name)}">${esc(pe.ticker||'—')}</button></td>
       <td>${esc(pe.name)}</td>
-      <td class="muted">${pe.same_industry?'<span class="dot" title="same sub-industry"></span>':''}${esc(pe.subindustry)}</td>
+      <td class="muted">${pe.same_industry?'<span class="dot" title="same sub-industry"></span>':''}${esc(pe.subindustry)}${pe.other_universe?'<span class="xu" title="drawn from the other size universe">cross</span>':''}</td>
       <td class="r mono">${fmtMult(pe.actual_multiple)}</td>
       <td class="r mono ${pe.log_adjustment>=0?'pos':'neg'}">&times;${pe.adjustment_factor.toFixed(3)}</td>
       <td class="r mono">${fmtMult(pe.adjusted_multiple)}</td>
@@ -379,8 +385,8 @@ function renderBreakdown(pe, target){
   const rows = pe.breakdown.map(b=>`
     <tr>
       <td>${esc(b.label)}</td>
-      <td class="r mono">${fmtNum(b.xi,3)}</td>
-      <td class="r mono">${fmtNum(b.xj,3)}</td>
+      <td class="r ${b.si!=null?'muted':'mono'}">${b.si!=null?esc(b.si):fmtNum(b.xi,3)}</td>
+      <td class="r ${b.sj!=null?'muted':'mono'}">${b.sj!=null?esc(b.sj):fmtNum(b.xj,3)}</td>
       <td class="r mono">${fmtNum(b.gi,3)}</td>
       <td class="r mono">${fmtNum(b.gj,3)}</td>
       <td class="r mono ${b.dg>=0?'pos':'neg'}">${fmtSigned(b.dg,3)}</td>

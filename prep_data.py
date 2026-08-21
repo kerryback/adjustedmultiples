@@ -1,168 +1,92 @@
 """prep_data.py — assemble the valuation app's data bundle.
 
-Combines, for the 2025 cross-section:
-  - firm identity + peer sets + GICS sub-industry  (from artifact_data_2025.json)
-  - CORRECTED-panel characteristics, EBITDA, EV, market cap (from extend2000 panels)
-  - the rung-1 additive g_k appraisal curves (from gk_curves parquet)
-into workspace/valuation_app/data/app_data.json, which app.py loads at startup.
+Reads the two files the research repo's Rule D site builder writes and merges
+them into `data/app_data.json`, which `app.py` loads at startup:
 
-The app values a target firm by the adjusted-multiple estimator (rung 1, lambda=1):
-  adjusted multiple of peer j (on target i's terms) = m_j * exp( sum_k [g_k(x_i) - g_k(x_j)] )
-  fair multiple of i = median over peers of the adjusted peer multiples
-  EV_fair = fair multiple * EBITDA_i
-Industry is handled by matching (peers are same-industry), so the 21 additive curves carry
-the adjustment. Re-run this after the pipeline refreshes the panel / curves.
+  site_firms_2025.json    one record per 2025 firm — identity, characteristics,
+                          EBITDA, EV, market cap, cross-fit fold, and its RULE D
+                          peer set
+  site_curves_2025.json   per sample, six fitted curve sets (five fold-out, one
+                          full-sample), each as exact piecewise cubics plus the
+                          flag effects, the gsubind class effects, and the value
+                          the design pipeline gives a missing characteristic
+
+Both are produced by, and only by,
+
+  workspaces/kerry-back/analyst/ruled/code/16_site_ruled.py
+
+in the `multiples` repo, whose two gates assert that the emitted bundle
+reproduces the paper's stored Rule D prediction for every firm in both samples.
+That is the reason this script does no estimation and reads no panel: any
+arithmetic done here would be arithmetic those gates did not check. It merges
+and writes, nothing else.
+
+The peer rule is RULE D (method_spec.md sec. 13d): the ladder is unchanged, but
+a firm's candidate peers are drawn from the whole April-30 cross-section rather
+than from its own size universe, so a microcap can now be a peer of a large firm
+and the other way round. The curves are the Rule D lead cell's own fits.
+
+Usage:  python prep_data.py            (reads ~/repos/multiples, or $MULTIPLES_REPO)
 """
 import json
 import os
 from pathlib import Path
-import numpy as np
-import pandas as pd
 
-# Paths. The three inputs moved twice since this script was written: the repo was
-# restructured into per-author trees on 2026-08-04 (workspace -> workspaces/<author>),
-# the panels were promoted to the shared canonical folder, and the peer rule changed
-# to Rule C on 2026-08-16. MULTIPLES_DATA locates the canonical panels; everything
-# else is derived from the repo, so nothing here is a bare absolute path.
-MULT = Path("/Users/kerryback/repos/multiples")
-GLOBAL_DATA = Path(os.environ["MULTIPLES_DATA"]).parent / "global"
-
-# Rule C rebuild of the two peer-dependent inputs (peer sets and appraisal curves).
-# Both come from the same clean-room run; taking one from here and the other from
-# the old Rule A tree would mix rules inside a single displayed valuation.
-RULEC = MULT / "workspaces/kerry-back/analyst/peer_rule_c/results/site"
-ARTIFACT = RULEC / "artifact_data_2025.json"
-STORE = RULEC / "gk_store"
+MULT = Path(os.environ.get("MULTIPLES_REPO",
+                           Path.home() / "repos" / "multiples"))
+SITE = MULT / "workspaces/kerry-back/analyst/ruled/results/site"
+FIRMS_IN = SITE / "site_firms_2025.json"
+CURVES_IN = SITE / "site_curves_2025.json"
 
 OUT = Path(__file__).resolve().parent / "data"
-OUT.mkdir(parents=True, exist_ok=True)
-
-# 21 additive characteristics in the model g, with display labels (order = presentation order)
-FEATURES = [
-    ("f_ebitdamargin", "EBITDA margin"),
-    ("f_grossmargin", "Gross margin"),
-    ("f_roa", "Return on assets (EBITDA/assets)"),
-    ("f_assetturn", "Asset turnover"),
-    ("f_salegrow", "Sales growth, 1yr (log)"),
-    ("f_salegrow3", "Sales growth, 3yr"),
-    ("f_assetgrow3", "Asset growth, 3yr"),
-    ("f_ltg", "Long-term growth forecast"),
-    ("f_epsgrow", "Forward EPS growth"),
-    ("has_ibes", "IBES coverage"),
-    ("f_rdsale", "R&D / sales"),
-    ("f_capxsale", "Capex / sales"),
-    ("f_leverage", "Leverage"),
-    ("f_cashassets", "Cash / assets"),
-    ("f_tangibility", "Tangibility"),
-    ("f_accruals", "Accruals"),
-    ("f_profitflag", "Profit-sign flag"),
-    ("f_ebitdapos", "EBITDA-positive flag"),
-    ("f_age", "Firm age (years)"),
-    ("log_at", "Log assets"),
-    ("log_sale", "Log sales"),
-]
-FEAT_KEYS = [k for k, _ in FEATURES]
 
 
 def main():
-    # --- identity + peers (names, tickers, sub-industry, peer gvkeys) ---
-    art = json.loads(ARTIFACT.read_text())
-    idmap = {f["gvkey"]: f for f in art["firms"]}
+    for p in (FIRMS_IN, CURVES_IN):
+        if not p.exists():
+            raise SystemExit(f"missing {p}\nRun 16_site_ruled.py in {MULT} first.")
+    firms = json.loads(FIRMS_IN.read_text())
+    curves = json.loads(CURVES_IN.read_text())
 
-    # --- corrected-panel characteristics for the 2025 positive-EBITDA cross-section ---
-    frames = []
-    for samp, path in [("nonmicro", "panel_nonmicro.parquet"),
-                       ("micro", "panel_micro.parquet")]:
-        p = pd.read_parquet(GLOBAL_DATA / path)
-        p = p[(p["valyear"] == 2025) & (p["ebitda_yield"].astype(float) > 0)].copy()
-        p["gvkey"] = p["gvkey"].astype(str)
-        p["sample"] = samp
-        frames.append(p)
-    panel = pd.concat(frames, ignore_index=True)
+    assert firms["year"] == curves["year"] == 2025
+    assert firms["peer_rule"] == curves["peer_rule"] == "D", "not a Rule D build"
+    assert firms["target"] == curves["target"] == "logmult"
 
-    # --- g_k curves for 2025 from the canonical store (single source of truth), PER SAMPLE:
-    #     the paper estimates non-micro and micro separately, so each sample has its own
-    #     full-sample (1-fold) fit, its own 5 cross-fit folds, and its own fold membership ---
-    def curves_dict(df):
-        out = {}
-        for feat, sub in df.groupby("feature"):
-            sub = sub.sort_values("x_grid")
-            out[feat] = {"x": sub["x_grid"].astype(float).tolist(),
-                         "g": sub["g_k"].astype(float).tolist()}
-        return out
-
-    STORE_FILES = {  # sample -> (gk_functions, fold_membership)
-        "nonmicro": ("gk_functions.parquet", "fold_membership.parquet"),
-        "micro":    ("gk_functions_micro.parquet", "fold_membership_micro.parquet"),
-    }
-    curves = {}
-    fold_assign = {}   # gvkey -> fold (gvkeys are disjoint across samples)
-    for samp, (gkf, fmf) in STORE_FILES.items():
-        gk = pd.read_parquet(STORE / gkf)
-        gk = gk[gk["year"] == 2025]
-        curves[samp] = {
-            "full": curves_dict(gk[gk["fold"] == "full"]),
-            "folds": {str(int(f)): curves_dict(g) for f, g in gk[gk["fold"] != "full"].groupby("fold")},
-        }
-        fm = pd.read_parquet(STORE / fmf)
-        fm = fm[fm["year"] == 2025]
-        fold_assign.update(dict(zip(fm["gvkey"].astype(str), fm["fold"].astype(int))))
-    n_folds = len(curves["nonmicro"]["folds"])
-
-    # --- assemble firm records (only firms present in BOTH panel and identity map) ---
-    firms = {}
-    for _, r in panel.iterrows():
-        gv = r["gvkey"]
-        meta = idmap.get(gv)
-        if meta is None or meta.get("ticker") in (None, ""):
-            continue
-        ebitda = float(r["ebitda"]); ev = float(r["ev"])
-        if not (np.isfinite(ebitda) and np.isfinite(ev) and ebitda > 0 and ev > 0):
-            continue
-        chars = {}
-        for k in FEAT_KEYS:
-            v = r.get(k)
-            chars[k] = None if v is None or (isinstance(v, float) and not np.isfinite(v)) else float(v)
-        firms[gv] = {
-            "gvkey": gv,
-            "ticker": meta["ticker"],
-            "name": meta["name"],
-            "sample": r["sample"],
-            "subindustry": meta.get("subindustry", ""),
-            "gsubind": meta.get("gsubind", ""),
-            "mktcap_b": round(float(r["mktcap"]) / 1000.0, 3),
-            "ebitda": round(ebitda / 1000.0, 4),   # $bn (panel stores $mm), consistent with mktcap_b
-            "ev": round(ev / 1000.0, 4),            # $bn
-            "multiple": round(ev / ebitda, 4),      # ratio, unit-independent
-            "fold": int(fold_assign.get(gv, -1)),   # cross-fit fold (non-micro 0-4; -1 = no fold)
-            "chars": chars,
-            "peers": [g for g in meta.get("peers", []) if g in idmap],
-        }
-    # keep only peers that we actually have full records (chars) for
-    have = set(firms)
-    for f in firms.values():
-        f["peers"] = [g for g in f["peers"] if g in have]
+    # every peer must be a firm the bundle can display, or the site quietly
+    # shows a shorter peer set than the estimator used
+    have = {f["gvkey"] for f in firms["firms"]}
+    dangling = sum(len([g for g in f["peers"] if g not in have])
+                   for f in firms["firms"])
+    assert dangling == 0, f"{dangling} peer slots point outside the bundle"
 
     bundle = {
         "year": 2025,
-        "features": [{"key": k, "label": lbl} for k, lbl in FEATURES],
-        "curves": curves,           # {sample: {"full": {...}, "folds": {"0".."4": {...}}}}
-        "n_folds": n_folds,
-        "firms": list(firms.values()),
+        "peer_rule": "D",
+        "features": firms["features"],
+        "n_folds": curves["n_folds"],
+        "curves": curves["curves"],
+        "firms": firms["firms"],
     }
-    (OUT / "app_data.json").write_text(json.dumps(bundle))
-    for samp in curves:
-        fs = [f for f in firms.values() if f["sample"] == samp]
-        nf = sum(1 for f in fs if f["fold"] >= 0)
-        npr = np.median([len(f["peers"]) for f in fs]) if fs else 0
-        print(f"[prep] {samp}: {len(fs)} firms ({nf} with a fold), median peers={npr:.0f}, "
-              f"full + {len(curves[samp]['folds'])} fold curve sets")
-    print(f"[prep] wrote {OUT/'app_data.json'}: {len(firms)} firms total")
-    # examples
-    for tk in ("AAPL", "CALM", "DPZ"):
-        m = next((f for f in firms.values() if f["ticker"] == tk), None)
+    OUT.mkdir(parents=True, exist_ok=True)
+    dest = OUT / "app_data.json"
+    dest.write_text(json.dumps(bundle))
+
+    for samp in bundle["curves"]:
+        fs = [f for f in bundle["firms"] if f["sample"] == samp]
+        npeers = sorted(len(f["peers"]) for f in fs)
+        out_of = sum(1 for f in fs
+                     if any(next(x for x in bundle["firms"] if x["gvkey"] == g)
+                            ["sample"] != samp for g in f["peers"]))
+        print(f"[prep] {samp}: {len(fs)} firms, median peers "
+              f"{npeers[len(npeers)//2]}, {out_of} with an out-of-sample peer, "
+              f"full + {len(bundle['curves'][samp]['folds'])} fold curve sets")
+    print(f"[prep] wrote {dest} ({dest.stat().st_size/1e6:.1f} MB, "
+          f"{len(bundle['firms'])} firms)")
+    for tk in ("AAPL", "CALM", "DPZ", "HPQ"):
+        m = next((f for f in bundle["firms"] if f["ticker"] == tk), None)
         if m:
-            print(f"  {tk}: {m['name']} mult={m['multiple']} peers={len(m['peers'])}")
+            print(f"  {tk}: {m['name']} mult={m['multiple']} "
+                  f"peers={len(m['peers'])} sample={m['sample']}")
 
 
 if __name__ == "__main__":
