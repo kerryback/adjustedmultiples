@@ -95,6 +95,9 @@
   .xu{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:9px;
       border:1px solid var(--hairline);color:var(--faint);font-size:10px;
       letter-spacing:.05em;text-transform:uppercase;vertical-align:middle}
+  /* the driver's definition, under its name, in the rank-matched strip */
+  .drvnote{display:block;font-family:var(--mono);font-size:11px;color:var(--faint);
+           letter-spacing:0;text-transform:none;margin-top:2px}
   .pos{color:var(--pos)} .neg{color:var(--neg)}
 
   /* a peer ticker opens its adjustment; frontier tickers are plain text, so the
@@ -202,8 +205,9 @@
     \[\tilde m_i \;=\; \underset{j\,\in\,\text{peers}}{\operatorname{median}}\;
       m_j \exp\!\left(\sum_k \left[g_k(x_i) - g_k(x_j)\right]\right)\]
   </div>
-  <p class="lede">Click any peer's ticker to see its adjustment built up characteristic by characteristic;
-    the Gradient Boosted tab values the same firm with a non-additive machine-learning frontier instead.</p>
+  <p class="lede">Click any peer's ticker to see its adjustment built up characteristic by characteristic.
+    The other two tabs value the same firm by the alternatives: a non-additive machine-learning frontier, and
+    rank matching on fundamentals with no industry restriction at all.</p>
 
   <form id="form" autocomplete="off">
     <div class="field">
@@ -245,9 +249,13 @@
       <button type="button" class="tab" role="tab" id="tab-gb" aria-controls="panel-gb" aria-selected="false" tabindex="-1">
         <span class="tabname">Gradient Boosted</span>
       </button>
+      <button type="button" class="tab" role="tab" id="tab-kkp" aria-controls="panel-kkp" aria-selected="false" tabindex="-1">
+        <span class="tabname">Rank Matched</span>
+      </button>
     </div>
     <div class="panel" id="panel-adj" role="tabpanel" aria-labelledby="tab-adj" tabindex="0"></div>
     <div class="panel" id="panel-gb" role="tabpanel" aria-labelledby="tab-gb" tabindex="0" hidden></div>
+    <div class="panel" id="panel-kkp" role="tabpanel" aria-labelledby="tab-kkp" tabindex="0" hidden></div>
   </div>
 
   <footer>
@@ -276,7 +284,8 @@
 <script>
 const $ = s => document.querySelector(s);
 const status_ = $("#status"), subject = $("#subject"), views = $("#views");
-const panelAdj = $("#panel-adj"), panelGb = $("#panel-gb"), dlg = $("#peerdlg");
+const panelAdj = $("#panel-adj"), panelGb = $("#panel-gb"),
+      panelKkp = $("#panel-kkp"), dlg = $("#peerdlg");
 let PAYLOAD = null;
 let METHOD = "full";
 let CURRENT_TK = "";
@@ -321,7 +330,7 @@ async function loadTickers(){
 }
 
 /* ---- tabs ---------------------------------------------------------------- */
-const TABS = ["adj","gb"];
+const TABS = ["adj","gb","kkp"];
 function setTab(key){
   TAB = key;
   TABS.forEach(k=>{
@@ -547,6 +556,142 @@ async function loadFrontier(tk, req){
   }
 }
 
+/* ---- rank-matched (KKP) panel -------------------------------------------- */
+let KKPLOAD = null;               // the live payload, for the peer dialog
+const fmtDrv = (v,f) => v==null ? "—" : (f==="bn" ? fmtB(v) : fmtNum(v,3));
+const fmtRank = v => v==null ? "—" : (v*100).toFixed(1)+"%";
+
+function kkpDriverStrip(d){
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>Driver</th><th class="r">${esc(d.ticker)}</th>
+      <th class="r">Percentile in the ${d.n_pool.toLocaleString()}-firm pool</th></tr></thead>
+    <tbody>${d.drivers.map(s=>`
+      <tr><td>${esc(s.label)}<span class="drvnote">${esc(s.note)}</span></td>
+        <td class="r mono">${fmtDrv(s.x,s.fmt)}</td>
+        <td class="r mono">${fmtRank(s.rank_pct)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function kkpPeerTable(d){
+  const rows = d.peers.map((pe,i)=>`
+    <tr>
+      <td class="tk"><button type="button" class="tklink" data-kpeer="${i}"
+        aria-label="Rank distance to ${esc(pe.ticker||pe.name)}">${esc(pe.ticker||'—')}</button></td>
+      <td>${esc(pe.name)}</td>
+      <td class="muted">${pe.same_industry?'<span class="dot" title="same sub-industry"></span>':''}${esc(pe.subindustry)}</td>
+      <td class="r mono">${fmtMult(pe.multiple_used)}${pe.winsorized?'<span class="xu" title="winsorized at the 0.5/99.5 percentiles of the pool">w</span>':''}</td>
+      <td class="r mono">${fmtNum(pe.sard,0)}</td>
+    </tr>`).join("");
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>Comparable</th><th>Company</th><th>Sub-industry</th>
+      <th class="r">Its multiple</th><th class="r">Rank distance</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function renderKkp(d, tk){
+  KKPLOAD = d;
+  if(!d.priced){
+    panelKkp.innerHTML = `<div class="empty">Rank matching abstains on <b>${esc(tk)}</b>:
+      ${esc(d.reason)}. The method screens on positive book equity, positive EBIT and sales,
+      and a fresh two-year consensus forecast, and prices no firm missing any of the five
+      drivers — its authors' own screen, which we keep. It abstains on about one firm in
+      four, and on more than half of microcaps.</div>`;
+    return;
+  }
+  panelKkp.innerHTML = `
+    <div class="card">
+      <div class="val">
+        <div class="big"><span class="k">Fair EV/EBITDA</span><span class="num">${fmtMult(d.fair_multiple)}</span>
+          <span class="sub">harmonic mean of ${d.n_peers} rank-matched multiples</span></div>
+        <div class="big"><span class="k">Fair enterprise value</span><span class="num">${fmtB(d.ev_fair)}</span>
+          <span class="sub">fair multiple &times; EBITDA (${fmtB(d.ebitda)})</span></div>
+        <div class="big"><span class="k">Market EV/EBITDA</span><span class="num">${fmtMult(d.actual_multiple)}</span>
+          <span class="sub">actual EV ${fmtB(d.actual_ev)}</span></div>
+      </div>
+      <div style="margin-top:14px">${verdict(d.pct_vs_fair,"rank-matched")}</div>
+    </div>
+
+    <div>
+      <h2 class="sec">Where ${esc(tk)} sits <span class="n">five drivers</span></h2>
+      <p class="lede" style="font-size:13.5px;margin:0 0 12px">
+        Knudsen, Kinserdal and P&ouml;schl match on the sum of absolute rank differences across five
+        fundamentals, arguing that comparables need not share the firm's industry. Every firm is ranked
+        across the whole ${d.n_pool.toLocaleString()}-firm 2025 cross-section; the six smallest total
+        rank distances are the comparables. Note the size driver: it is the <b>contemporaneous</b> market
+        capitalization, as the authors specify, so a firm's own current price helps choose its own peers.
+        Our rule matches on lagged capitalization instead.</p>
+      ${kkpDriverStrip(d)}
+    </div>
+
+    <div>
+      <h2 class="sec">Rank-matched comparables <span class="n">${d.n_peers} firms</span>
+        <span class="hint">Click a ticker for the rank distance</span></h2>
+      <p class="lede" style="font-size:13.5px;margin:0 0 12px">
+        ${d.n_same_industry===0
+          ? `None of the six shares ${esc(tk)}'s sub-industry`
+          : `${d.n_same_industry} of the six share ${esc(tk)}'s sub-industry`}
+        &mdash; the method never looks at industry. The valuation is the harmonic mean of their multiples:</p>
+      <div class="eq">\\[\\hat m_i \\;=\\; \\left(\\frac{1}{6}\\sum_{j} \\frac{1}{m_j}\\right)^{-1}\\]</div>
+      ${kkpPeerTable(d)}
+    </div>`;
+  typeset(panelKkp);
+}
+
+function renderKkpLedger(pe, d){
+  const rows = pe.drivers.map(b=>`
+    <tr>
+      <td>${esc(b.label)}</td>
+      <td class="r mono">${fmtDrv(b.xi,b.fmt)}</td>
+      <td class="r mono">${fmtDrv(b.xj,b.fmt)}</td>
+      <td class="r mono">${fmtRank(b.ri)}</td>
+      <td class="r mono">${fmtRank(b.rj)}</td>
+      <td class="r mono">${fmtRank(b.dr)}</td>
+    </tr>`).join("");
+  return `<div class="tablewrap"><table>
+    <thead><tr><th>Driver</th>
+      <th class="r">${esc(d.ticker)}</th><th class="r">${esc(pe.ticker)}</th>
+      <th class="r">${esc(d.ticker)} rank</th><th class="r">${esc(pe.ticker)} rank</th>
+      <th class="r">Gap</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="buildup">The five gaps add to the rank distance that put ${esc(pe.ticker)} in the set:
+      <div class="eq">\\[\\text{SARD} = ${fmtNum(pe.sard,0)}\\ \\text{of}\\ ${d.n_pool.toLocaleString()}\\ \\text{rank points across five drivers}\\]</div>
+      Its own multiple, ${fmtNum(pe.multiple_used,2)}, enters the harmonic mean unadjusted &mdash; rank
+      matching picks comparables and then averages, with no adjustment step at all.</div>`;
+}
+
+function openKkpPeer(i){
+  if(!KKPLOAD || !KKPLOAD.priced) return;
+  const pe = KKPLOAD.peers[i];
+  if(!pe) return;
+  $("#dlgtk").textContent = pe.ticker || "—";
+  $("#dlgname").textContent = pe.name || "";
+  $("#dlgctx").textContent = `How close it sits to ${KKPLOAD.ticker} on the five drivers`;
+  $("#dlgbody").innerHTML = renderKkpLedger(pe, KKPLOAD);
+  typeset($("#dlgbody"));
+  dlg.showModal();
+}
+panelKkp.addEventListener("click", e=>{
+  const b = e.target.closest(".tklink");
+  if(b) openKkpPeer(+b.dataset.kpeer);
+});
+
+async function loadKkp(tk, req){
+  try{
+    const r = await fetch("/api/kkp/"+encodeURIComponent(tk));
+    if(req!==REQ) return;
+    if(!r.ok){
+      panelKkp.innerHTML = `<div class="empty">No rank-matched valuation for <b>${esc(tk)}</b> in the 2025 sample.</div>`;
+      return;
+    }
+    const d = await r.json();
+    if(req!==REQ) return;
+    renderKkp(d, tk);
+  }catch(e){
+    if(req!==REQ) return;
+    panelKkp.innerHTML = `<div class="empty">Could not load the rank-matched valuation for <b>${esc(tk)}</b>.</div>`;
+  }
+}
+
 /* ---- lookup -------------------------------------------------------------- */
 async function lookup(tk){
   tk=(tk||"").trim().toUpperCase();
@@ -556,7 +701,7 @@ async function lookup(tk){
   if(!tk){ status_.innerHTML=""; subject.innerHTML=""; views.hidden=true; return; }
   status_.innerHTML = `<div class="empty">Valuing <b>${esc(tk)}</b>…</div>`;
   subject.innerHTML = ""; views.hidden = true;
-  panelAdj.innerHTML = ""; panelGb.innerHTML = "";
+  panelAdj.innerHTML = ""; panelGb.innerHTML = ""; panelKkp.innerHTML = "";
   try{
     const r = await fetch("/api/valuation/"+encodeURIComponent(tk)+"?method="+METHOD);
     if(req!==REQ) return;
@@ -570,6 +715,7 @@ async function lookup(tk){
     render(p);
     views.hidden = false;
     loadFrontier(tk, req);
+    loadKkp(tk, req);
   }catch(e){
     if(req!==REQ) return;
     status_.innerHTML = `<div class="empty">Error valuing <b>${esc(tk)}</b>: ${esc(e.message)}</div>`;

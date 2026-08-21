@@ -226,6 +226,101 @@ def frontier(ticker: str, method: str = "full"):
             "n_nonzero": len(peers), "peers": peers}
 
 
+# ---------------------------------------------------------------- KKP (SARD)
+KKP = DATA["kkp"]                 # {"drivers": [...], "firms": {gvkey: record}}
+KKP_FIRMS = KKP["firms"]
+KKP_DRIVERS = KKP["drivers"]      # [{key,label,note}] in the paper's order
+
+
+@app.get("/api/kkp/{ticker}")
+def kkp(ticker: str):
+    """KKP rank-matching (Knudsen, Kinserdal and Poeschl; SARD).
+
+    The classical benchmark that wins the classical horse race. Each firm is
+    ranked across the FULL 2025 cross-section on five drivers; its comparables
+    are the six firms with the smallest sum of absolute rank differences, with
+    no industry restriction at all; the valuation is the harmonic mean of their
+    multiples. The method abstains when a driver is missing, which is its
+    authors' own screen and which this endpoint reports rather than papers over.
+
+    Nothing is computed here beyond the display arithmetic: the peer sets, the
+    ranks and the harmonic mean come from the research build, which gates them
+    against the paper's own KKP column firm by firm.
+    """
+    t = BY_TICKER.get(ticker.strip().upper())
+    if t is None:
+        raise HTTPException(status_code=404,
+                            detail=f"No firm with ticker '{ticker}' in the 2025 sample.")
+    rec = KKP_FIRMS.get(t["gvkey"])
+    head = {"ticker": t["ticker"], "name": t["name"], "sample": t["sample"],
+            "subindustry": t["subindustry"],
+            "actual_multiple": t["multiple"], "actual_ev": t["ev"],
+            "ebitda": t["ebitda"]}
+    if rec is None:
+        missing = "one or more of its five drivers is missing"
+        return {**head, "priced": False, "reason": missing,
+                "drivers": [{"key": d["key"], "label": d["label"],
+                             "note": d["note"], "x": None, "rank_pct": None,
+                             "fmt": "bn" if d["key"] == "k_size" else "num"}
+                            for d in KKP_DRIVERS]}
+
+    n_pool = rec["n_pool"]
+
+    def pct(r):
+        return None if r is None else r / n_pool
+
+    def val(d, src):
+        """Market capitalization is carried in $mm, like everything on the
+        panel; every other driver is a ratio. `fmt` tells the page which."""
+        x = src.get(d["key"])
+        if x is not None and d["key"] == "k_size":
+            return x / 1000.0
+        return x
+
+    subj = [{"key": d["key"], "label": d["label"], "note": d["note"],
+             "fmt": "bn" if d["key"] == "k_size" else "num",
+             "x": val(d, rec["drivers"]),
+             "rank_pct": pct(rec["ranks"].get(d["key"]))}
+            for d in KKP_DRIVERS]
+
+    peers = []
+    for pe in rec["peers"]:
+        j = FIRMS.get(pe["gvkey"], {})
+        peers.append({
+            "gvkey": pe["gvkey"], "ticker": j.get("ticker"),
+            "name": j.get("name"), "subindustry": j.get("subindustry"),
+            "sample": j.get("sample"),
+            "same_industry": j.get("gsubind") == t.get("gsubind"),
+            "actual_multiple": j.get("multiple"),
+            # the harmonic mean uses the 0.5/99.5-winsorized multiple, so that
+            # is the number shown as entering it
+            "multiple_used": pe["multiple_winsorized"],
+            "winsorized": (j.get("multiple") is not None
+                           and abs(j["multiple"] - pe["multiple_winsorized"]) > 1e-6),
+            "sard": pe["sard"],
+            "drivers": [{
+                "key": d["key"], "label": d["label"],
+                "fmt": "bn" if d["key"] == "k_size" else "num",
+                "xi": val(d, rec["drivers"]),
+                "xj": val(d, pe["drivers"]),
+                "ri": pct(rec["ranks"].get(d["key"])),
+                "rj": pct(pe["ranks"].get(d["key"])),
+                "dr": abs(rec["ranks"].get(d["key"], 0.0)
+                          - pe["ranks"].get(d["key"], 0.0)) / n_pool,
+            } for d in KKP_DRIVERS],
+        })
+
+    fair = rec["fair_multiple"]
+    ev_fair = fair * t["ebitda"]
+    same = sum(1 for pe in peers if pe["same_industry"])
+    return {**head, "priced": True,
+            "fair_multiple": fair, "ev_fair": ev_fair,
+            "pct_vs_fair": t["ev"] / ev_fair - 1.0,
+            "n_peers": len(peers), "n_pool": n_pool,
+            "n_same_industry": same,
+            "drivers": subj, "peers": peers}
+
+
 @app.get("/")
 def index():
     return FileResponse(APP_DIR / "static" / "index.html")

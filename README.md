@@ -46,6 +46,25 @@ each firm is valued out-of-sample by the model fitted without its own fold. The
 full-sample fit is a display object, fitted for this site alone on all 2025 rows under
 the same Rule D peer sets, the same inherited η\*, and the same five backfit alternations.
 
+## The three tabs
+
+**Adjusted Multiples** is the paper's estimator, above. **Gradient Boosted** is the
+machine-learning frontier — the same firm valued as a weighted average of the whole
+cross-section, with no peer step, so the weights are diffuse rather than named.
+
+**Rank Matched** is KKP (Knudsen, Kinserdal and Pöschl), the strongest classical
+comparables method in the paper's horse race. Each firm is ranked across the whole 2025
+cross-section on five drivers — return on equity, net debt over EBIT, market
+capitalization, implied growth from the consensus FY2/FY1 forecast, and the EBIT margin
+— and its comparables are the six firms with the smallest sum of absolute rank
+differences, with no industry restriction whatever. The valuation is the harmonic mean
+of their multiples; there is no adjustment step. Two things the tab makes visible: the
+six comparables usually share no industry with the subject (5.5% of them sit in its own
+sub-industry, on average), and the size driver is the *contemporaneous* market
+capitalization, as the authors specify, so a firm's own current price helps choose its
+own peers. The method abstains where a driver is missing — its authors' screen, which we
+keep — and so prices 87% of non-microcaps and 43% of microcaps.
+
 ## Run locally
 
 ```bash
@@ -63,13 +82,14 @@ characteristic by characteristic.
 - `app.py` — FastAPI backend and the valuation logic.
 - `static/index.html` — the single-page frontend.
 - `data/app_data.json` — pre-built bundle (2025 firms, characteristics, Rule D peer sets,
-  and the fitted curve sets). This is what the app serves; no research data or pandas at
-  runtime.
+  the fitted curve sets, and the KKP rank-matched sets). This is what the app serves; no
+  research data or pandas at runtime.
 - `data/ml_frontier.npz` — the machine-learning frontier's implicit peer weights, for the
   Gradient Boosted tab. The frontier has no peer step, so the peer rule does not move it
   and it was not rebuilt.
 - `prep_data.py` — dev tool that assembles `data/app_data.json` from the research repo's
-  `workspaces/kerry-back/analyst/ruled/code/16_site_ruled.py` output. Not used at runtime.
+  `workspaces/kerry-back/analyst/ruled/code/{16_site_ruled,17_site_kkp}.py` output. Not
+  used at runtime.
 - `check_bundle.py` — dev tool that checks the assembled bundle against the paper's
   stored numbers. Run it before deploying.
 - `Dockerfile` — container image (used by the Koyeb deploy).
